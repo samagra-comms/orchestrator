@@ -10,6 +10,10 @@ import com.uci.utils.CampaignService;
 import com.uci.utils.encryption.AESWrapper;
 import com.uci.utils.kafka.ReactiveProducer;
 import com.uci.utils.kafka.SimpleProducer;
+import com.uci.utils.telemetry.LogTelemetryMessage;
+import com.uci.utils.telemetry.TelemetryLogger;
+import com.uci.utils.telemetry.util.TelemetryEventNames;
+
 import io.fusionauth.domain.api.UserResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,6 +23,8 @@ import messagerosa.core.model.XMessage;
 import messagerosa.xml.XMessageParser;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.kafka.common.protocol.types.Field;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.kie.api.runtime.KieSession;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,8 +53,8 @@ public class ReactiveConsumer {
 
     private final Flux<ReceiverRecord<String, String>> reactiveKafkaReceiver;
 
-    @Autowired
-    public KieSession kSession;
+//    @Autowired
+//    public KieSession kSession;
 
     @Autowired
     public XMessageRepository xMessageRepository;
@@ -76,9 +82,15 @@ public class ReactiveConsumer {
     private final String DEFAULT_APP_NAME = "Global Bot";
     LocalDateTime yesterday = LocalDateTime.now().minusDays(1L);
 
+    private static final Logger telemetrylogger = LogManager.getLogger(TelemetryLogger.class);
+    
+    @Value("${producer.id}")
+	private String producerID;
+    
     @EventListener(ApplicationStartedEvent.class)
     public void onMessage() {
         reactiveKafkaReceiver
+        		.doOnError(genericError("Error in receiving message from kafka", null))
                 .doOnNext(new Consumer<ReceiverRecord<String, String>>() {
                     @Override
                     public void accept(ReceiverRecord<String, String> stringMessage) {
@@ -87,34 +99,41 @@ public class ReactiveConsumer {
                             XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.value().getBytes()));
                             SenderReceiverInfo from = msg.getFrom();
                             getAppName(msg.getPayload().getText(), msg.getFrom())
-                                    .doOnNext(new Consumer<String>() {
+                            		.doOnError(genericError("Error in getting app name", msg))
+                            		.doOnNext(new Consumer<String>() {
                                         @Override
                                         public void accept(String appName) {
                                             logTimeTaken(startTime, 2);
                                             fetchAdapterID(appName)
-                                                    .doOnNext(new Consumer<String>() {
+                                            		.doOnError(genericError("Error in fetching adpater id", msg))
+                                            		.doOnNext(new Consumer<String>() {
                                                         @Override
                                                         public void accept(String adapterID) {
                                                             logTimeTaken(startTime, 3);
                                                             from.setCampaignID(appName);
                                                             from.setDeviceType(DeviceType.PHONE);
                                                             resolveUser(from, appName)
-                                                                    .doOnNext(new Consumer<SenderReceiverInfo>() {
+                                                            		.doOnError(genericError("Error in resolving user", msg))
+                                                            		.doOnNext(new Consumer<SenderReceiverInfo>() {
                                                                         @Override
                                                                         public void accept(SenderReceiverInfo from) {
                                                                             msg.setFrom(from);
                                                                             msg.setApp(appName);
                                                                             getLastMessageID(msg)
-                                                                                    .doOnNext(lastMessageID -> {
+                                                                            		.doOnError(genericError("Error in getting last message id", msg))
+                                                                            		.doOnNext(lastMessageID -> {
                                                                                         logTimeTaken(startTime, 4);
                                                                                         msg.setLastMessageID(lastMessageID);
                                                                                         msg.setAdapterId(adapterID);
+                                                                                        /* Logs for telemetry events */
+                                                                                        logTelemteryEvents(msg);
                                                                                         if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
                                                                                             try {
                                                                                                 kafkaProducer.send(odkTransformerTopic, msg.toXML());
                                                                                                 // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
                                                                                             } catch (JAXBException e) {
                                                                                                 e.printStackTrace();
+                                                                                                genericError("Error in sending message to kafka topic", msg);
                                                                                             }
                                                                                             logTimeTaken(startTime, 15);
                                                                                         }
@@ -143,6 +162,39 @@ public class ReactiveConsumer {
                 })
                 .subscribe();
     }
+    
+    private void logTelemteryEvents(XMessage msg) {
+    	/* Start Conversation Log */
+        if(msg.getMessageState().equals(XMessage.MessageState.SENT)) {
+        	telemetrylogger.info(new LogTelemetryMessage(String.format("Message sent"),
+					TelemetryEventNames.SENT, "", msg.getChannel(),
+					msg.getProvider(), producerID, msg.getFrom().getUserID()));
+        } else if(msg.getMessageState().equals(XMessage.MessageState.DELIVERED)) {
+        	telemetrylogger.info(new LogTelemetryMessage(String.format("Message Delivered"),
+					TelemetryEventNames.DELIVERED, "", msg.getChannel(),
+					msg.getProvider(), producerID, msg.getFrom().getUserID()));
+        } else if(msg.getMessageState().equals(XMessage.MessageState.READ)) {
+        	telemetrylogger.info(new LogTelemetryMessage(String.format("Message Read"),
+					TelemetryEventNames.READ, "", msg.getChannel(),
+					msg.getProvider(), producerID, msg.getFrom().getUserID()));
+        }
+    }
+    
+    /* Error to be logged */
+    private Consumer<Throwable> genericError(String s, XMessage xmsg) {
+		return c -> {
+			log.error(s + "::" + c.getMessage());
+			/* Log Telemetry event - Exception */
+			if(xmsg != null) {
+				telemetrylogger.info(new LogTelemetryMessage(s,
+						TelemetryEventNames.AUDITEXCEPTIONS, "", xmsg.getChannel(),
+						xmsg.getProvider(), producerID, xmsg.getFrom().getUserID()));
+			} else {
+				telemetrylogger.info(new LogTelemetryMessage(s,
+						TelemetryEventNames.AUDITEXCEPTIONS));
+			}
+		};
+	}
 
     private Mono<SenderReceiverInfo> resolveUser(SenderReceiverInfo from, String appName) {
         try {

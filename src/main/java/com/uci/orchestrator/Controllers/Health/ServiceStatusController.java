@@ -6,11 +6,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.uci.dao.service.HealthService;
+import com.uci.utils.telemetry.LogTelemetryBuilder;
+import com.uci.utils.telemetry.TelemetryLogger;
 
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -55,6 +59,24 @@ public class ServiceStatusController {
         
         return ResponseEntity.ok(jsonNode);
     }
+    
+    private static final Logger logger = LogManager.getLogger();
+    
+    /*
+	 * Test with default kafka appender 
+	 * telemetry object build internally via custom layout mentioned in xml by sent message
+	 */
+	@RequestMapping(value = "/test/logs", method = RequestMethod.GET, produces = { "application/json", "text/json" })
+	public ResponseEntity<JsonNode> testKafkaLogAppender() throws JsonProcessingException, IOException {
+		ObjectMapper mapper = new ObjectMapper();
+		JsonNode jsonNode = mapper.readTree("{\"responseCode\":\"OK\"}");
+
+		logger.info("Info Test Message");
+
+		logger.error("Error Test Message");
+
+		return ResponseEntity.ok(jsonNode);
+	}
     
     /**
      * Returns json node for service response
