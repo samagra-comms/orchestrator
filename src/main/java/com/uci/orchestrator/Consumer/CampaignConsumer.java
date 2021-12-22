@@ -33,7 +33,7 @@ public class CampaignConsumer {
     @Autowired
     private CampaignService campaignService;
 
-    @KafkaListener(id = "${campaign}", topics = "${campaign}")
+//    @KafkaListener(id = "${campaign}", topics = "${campaign}")
     public void consumeMessage(String campaignID) throws Exception {
         log.info("CampaignID {}", campaignID);
         processMessage(campaignID)
