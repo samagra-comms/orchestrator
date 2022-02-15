@@ -197,12 +197,13 @@ public class ReactiveConsumer {
             String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
             String encodedBase64Key = encodeKey(secret);
             String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
-            log.info("deviceString: "+deviceString+", deviceID: "+deviceString);
+            log.info("deviceString: "+deviceString+", encyprted deviceString: "+deviceID);
             ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
             if (response.wasSuccessful()) {
                 log.info("FA response user uuid: "+response.successResponse.user.id.toString()
                 +", username: "+response.successResponse.user.username);
                 from.setDeviceID(response.successResponse.user.id.toString());
+                from.setEncryptedDeviceID(deviceID);
                 xmsg.setFrom(from);
                 return xmsgCampaignForm(xmsg, response.successResponse.user);
             } else {
@@ -212,6 +213,7 @@ public class ReactiveConsumer {
                             public Mono<XMessage> apply(Pair<Boolean, String> result) {
                                 if (result.getLeft()) {
                                     from.setDeviceID(result.getRight());
+                                    from.setEncryptedDeviceID(deviceID);
                                     xmsg.setFrom(from);
                                     ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
                                     if (response.wasSuccessful()) {
