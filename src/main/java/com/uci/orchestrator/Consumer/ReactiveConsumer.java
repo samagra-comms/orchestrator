@@ -126,7 +126,9 @@ public class ReactiveConsumer {
                                 public void accept(String adapterID) {
                                     logTimeTaken(startTime, 3);
                                     from.setCampaignID(msg.getApp());
-                                    from.setDeviceType(DeviceType.PHONE);
+                                    if(from.getDeviceType() == null) {
+                                        from.setDeviceType(DeviceType.PHONE);
+                                    }
                                     resolveUserNew(msg)
                                             .doOnNext(new Consumer<XMessage>() {
                                                 @Override
@@ -194,7 +196,7 @@ public class ReactiveConsumer {
             SenderReceiverInfo from = xmsg.getFrom();
             String appName = xmsg.getApp();
             
-            String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
+            String deviceString = from.getDeviceType().name() + ":" + from.getUserID();
             String encodedBase64Key = encodeKey(secret);
             String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
             log.info("deviceString: "+deviceString+", encyprted deviceString: "+deviceID);
