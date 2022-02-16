@@ -109,48 +109,60 @@ public class ReactiveConsumer {
     
     @EventListener(ApplicationStartedEvent.class)
     public void onMessage() {
-    	
+    	log.info("O1 - Message listener");
         reactiveKafkaReceiver
                 .doOnNext(new Consumer<ReceiverRecord<String, String>>() {
                     @Override
                     public void accept(ReceiverRecord<String, String> stringMessage) {
                         try {
+                        	log.info("O2 - Message processed");
                             final long startTime = System.nanoTime();
                             logTimeTaken(startTime, 0);
                             XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.value().getBytes()));
                             SenderReceiverInfo from = msg.getFrom();
                             logTimeTaken(startTime, 1);
+                            log.info("O3 - getAppName");
                             getAppName(msg.getPayload().getText(), msg.getFrom())
                                     .doOnNext(new Consumer<String>() {
                                         @Override
                                         public void accept(String appName) {
+                                        	log.info("O4 - appName fetched: "+appName);
                                             logTimeTaken(startTime, 2);
                                             msg.setApp(appName);
+                                            log.info("O5 - fetchAdapterID");
                                             fetchAdapterID(appName)
                                                     .doOnNext(new Consumer<String>() {
                                                         @Override
                                                         public void accept(String adapterID) {
-                                                            logTimeTaken(startTime, 3);
+                                                        	log.info("O6 - AdapterID fetched: "+adapterID);
+                                                        	logTimeTaken(startTime, 3);
 
                                                             from.setCampaignID(appName);
                                                             from.setDeviceType(DeviceType.PHONE);
+                                                            log.info("O7 - resolveUserNew");
                                                             resolveUserNew(msg)
                                                                     .doOnNext(new Consumer<XMessage>() {
                                                                         @Override
                                                                         public void accept(XMessage msg) {
+                                                                        	log.info("O8 - resolveUserNew XMessage from deviceID: "+msg.getFrom().getDeviceID()+", and appName: "+appName);
                                                                         	SenderReceiverInfo from = msg.getFrom();
                                                                             // msg.setFrom(from);
                                                                             msg.setApp(appName);
+                                                                            log.info("O9 - getLastMessageID");
                                                                             getLastMessageID(msg)
                                                                                     .doOnNext(lastMessageID -> {
+                                                                                    	log.info("O10 - getLastMessageID: "+lastMessageID);
                                                                                         logTimeTaken(startTime, 4);
                                                                                         msg.setLastMessageID(lastMessageID);
                                                                                         msg.setAdapterId(adapterID);
+                                                                                        log.info("O11 - check msg state: "+msg.getMessageState());
                                                                                         if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
                                                                                             try {
-                                                                                                kafkaProducer.send(odkTransformerTopic, msg.toXML());
+                                                                                            	log.info("O12 - send to kafka");
+                                                                                            	kafkaProducer.send(odkTransformerTopic, msg.toXML());
                                                                                                 // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
                                                                                             } catch (JAXBException e) {
+                                                                                            	log.info("O13 - Exception in send to kafka");
                                                                                                 e.printStackTrace();
                                                                                             }
                                                                                             logTimeTaken(startTime, 15);
@@ -159,7 +171,7 @@ public class ReactiveConsumer {
                                                                                     .doOnError(new Consumer<Throwable>() {
                                                                                         @Override
                                                                                         public void accept(Throwable throwable) {
-                                                                                            log.error("Error in getLastMessageID" + throwable.getMessage());
+                                                                                            log.error("O14 - Error in getLastMessageID" + throwable.getMessage());
                                                                                         }
                                                                                     })
                                                                                     .subscribe();
@@ -168,7 +180,7 @@ public class ReactiveConsumer {
                                                                     .doOnError(new Consumer<Throwable>() {
                                                                         @Override
                                                                         public void accept(Throwable throwable) {
-                                                                            log.error("Error in resolveUser" + throwable.getMessage());
+                                                                            log.error("O15 - Error in resolveUser: " + throwable.getMessage());
                                                                         }
                                                                     })
                                                                     .subscribe();
@@ -178,7 +190,7 @@ public class ReactiveConsumer {
                                                     .doOnError(new Consumer<Throwable>() {
                                                         @Override
                                                         public void accept(Throwable throwable) {
-                                                            log.error("Error in fetchAdapterID" + throwable.getMessage());
+                                                            log.error("O16- Error in fetchAdapterID: " + throwable.getMessage());
                                                         }
                                                     })
                                                     .subscribe();
@@ -187,7 +199,7 @@ public class ReactiveConsumer {
                                     .doOnError(new Consumer<Throwable>() {
                                         @Override
                                         public void accept(Throwable throwable) {
-                                            log.error("Error in getAppName" + throwable.getMessage());
+                                            log.error("O17 - Error in getAppName: " + throwable.getMessage());
                                         }
                                     })
                                     .subscribe();
@@ -200,7 +212,7 @@ public class ReactiveConsumer {
                     @Override
                     public void accept(Throwable e) {
                         System.out.println(e.getMessage());
-                        log.error("KafkaFlux exception", e);
+                        log.error("O18 - KafkaFlux exception: "+e.getMessage());
                     }
                 })
                 .subscribe();
@@ -208,32 +220,42 @@ public class ReactiveConsumer {
     
     private Mono<XMessage> resolveUserNew(XMessage xmsg) {
         try {
+        	log.info("RUN1 - Start resolveUserNew");   
         	SenderReceiverInfo from = xmsg.getFrom();
         	String appName = xmsg.getApp();
-        	
         	String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
             String encodedBase64Key = encodeKey(secret);
             String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
+            log.info("RUN2 - User deviceID: "+deviceID+", deviceString: "+deviceString);   
             ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
             if (response.wasSuccessful()) {
+            	log.info("RUN3 - FA retrieveUserByUsername was successful, for User UUID: "+response.successResponse.user.id.toString());
                 from.setDeviceID(response.successResponse.user.id.toString());
                 xmsg.setFrom(from);
-                return xmsgCampaignForm(xmsg, response.successResponse.user);
+                return Mono.just(xmsg);
+//                return xmsgCampaignForm(xmsg, response.successResponse.user);
             } else {
+            	log.error("RUN4 - FA retrieveUserByUsername was not successful");
                 return botService.updateUser(deviceString, appName)
                         .flatMap(new Function<Pair<Boolean, String>, Mono<XMessage>>() {
                             @Override
                             public Mono<XMessage> apply(Pair<Boolean, String> result) {
+                            	log.info("RUN5 - botService.updateUser status : "+result.getLeft());
                                 if (result.getLeft()) {
-                                    from.setDeviceID(result.getRight());
+                                	log.info("RUN6 - botService.updateUser User UUID : "+result.getRight());                                    
+                                	from.setDeviceID(result.getRight());
                                     xmsg.setFrom(from);
                                     ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
                                     if (response.wasSuccessful()) {
-                                    	return xmsgCampaignForm(xmsg, response.successResponse.user);
+                                    	log.info("RUN7 - botService.updateUser retrieveUserByUsername was successful");                                    
+                                    	return Mono.just(xmsg);
+//                                    	return xmsgCampaignForm(xmsg, response.successResponse.user);
                                     } else {
+                                    	log.error("RUN8 - botService.updateUser retrieveUserByUsername was successful");
                                     	return Mono.just(xmsg);
                                     }
                                 } else {
+                                	log.info("RUN9 - botService.updateUser User UUID is null");
                                 	xmsg.setFrom(null);
                                     return Mono.just(xmsg);
                                 }
@@ -241,13 +263,13 @@ public class ReactiveConsumer {
                         }).doOnError(new Consumer<Throwable>() {
                             @Override
                             public void accept(Throwable throwable) {
-                                log.error("Error in updateUser" + throwable.getMessage());
+                                log.error("RUN10 - Error in updateUser" + throwable.getMessage());
                             }
                         });
             }
         } catch (Exception e) {
             e.printStackTrace();
-            log.error("Error in resolveUser" + e.getMessage());
+            log.error("RUN11 -  Error in resolveUser: " + e.getMessage());
             xmsg.setFrom(null);
             return Mono.just(xmsg);
         }
