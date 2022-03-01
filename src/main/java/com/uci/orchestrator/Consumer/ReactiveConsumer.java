@@ -21,6 +21,7 @@ import io.fusionauth.domain.api.UserConsentResponse;
 import io.fusionauth.domain.api.UserRequest;
 import io.fusionauth.domain.api.UserResponse;
 import io.fusionauth.domain.User;
+import io.fusionauth.domain.UserRegistration;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import messagerosa.core.model.DeviceType;
@@ -127,44 +128,48 @@ public class ReactiveConsumer {
                                     logTimeTaken(startTime, 3);
                                     from.setCampaignID(msg.getApp());
                                     from.setDeviceType(DeviceType.PHONE);
-                                    resolveUserNew(msg)
-                                            .doOnNext(new Consumer<XMessage>() {
-                                                @Override
-                                                public void accept(XMessage msg) {
-                                                    SenderReceiverInfo from = msg.getFrom();
-                                                    // msg.setFrom(from);
-                                                    getLastMessageID(msg)
-                                                            .doOnNext(lastMessageID -> {
-                                                                logTimeTaken(startTime, 4);
-                                                                msg.setLastMessageID(lastMessageID);
-                                                                msg.setAdapterId(adapterID);
-                                                                if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
-                                                                    try {
-                                                                        kafkaProducer.send(odkTransformerTopic, msg.toXML());
-                                                                        // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
-                                                                    } catch (JAXBException e) {
-                                                                        e.printStackTrace();
-                                                                    }
-                                                                    logTimeTaken(startTime, 15);
+                                    botService.getBotIDFromBotName(msg.getApp()).doOnNext(new Consumer<String>() {
+                                    	@Override
+                                        public void accept(String appId) {
+                                    		resolveUserNew(msg, appId)
+                                        	.doOnNext(new Consumer<XMessage>() {
+                                            @Override
+                                            public void accept(XMessage msg) {
+                                                SenderReceiverInfo from = msg.getFrom();
+                                                // msg.setFrom(from);
+                                                getLastMessageID(msg)
+                                                        .doOnNext(lastMessageID -> {
+                                                            logTimeTaken(startTime, 4);
+                                                            msg.setLastMessageID(lastMessageID);
+                                                            msg.setAdapterId(adapterID);
+                                                            if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
+                                                                try {
+                                                                    kafkaProducer.send(odkTransformerTopic, msg.toXML());
+                                                                    // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
+                                                                } catch (JAXBException e) {
+                                                                    e.printStackTrace();
                                                                 }
-                                                            })
-                                                            .doOnError(new Consumer<Throwable>() {
-                                                                @Override
-                                                                public void accept(Throwable throwable) {
-                                                                    log.error("Error in getLastMessageID" + throwable.getMessage());
-                                                                }
-                                                            })
-                                                            .subscribe();
-                                                }
-                                            })
-                                            .doOnError(new Consumer<Throwable>() {
-                                                @Override
-                                                public void accept(Throwable throwable) {
-                                                    log.error("Error in resolveUser" + throwable.getMessage());
-                                                }
-                                            })
-                                            .subscribe();
-
+                                                                logTimeTaken(startTime, 15);
+                                                            }
+                                                        })
+                                                        .doOnError(new Consumer<Throwable>() {
+                                                            @Override
+                                                            public void accept(Throwable throwable) {
+                                                                log.error("Error in getLastMessageID" + throwable.getMessage());
+                                                            }
+                                                        })
+                                                        .subscribe();
+                                            }
+                                        })
+                                        .doOnError(new Consumer<Throwable>() {
+                                            @Override
+                                            public void accept(Throwable throwable) {
+                                                log.error("Error in resolveUser" + throwable.getMessage());
+                                            }
+                                        }).subscribe();
+                                    	}
+                                        
+                                    }).subscribe();
                                 }
                             })
                             .doOnError(new Consumer<Throwable>() {
@@ -189,17 +194,21 @@ public class ReactiveConsumer {
                 .subscribe();
     }
     
-    private Mono<XMessage> resolveUserNew(XMessage xmsg) {
+    private Mono<XMessage> resolveUserNew(XMessage xmsg, String appId) {
         try {
             SenderReceiverInfo from = xmsg.getFrom();
             String appName = xmsg.getApp();
+            Boolean found = false;
+            
+            UUID appID = UUID.fromString(appId);
             
             String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
             String encodedBase64Key = encodeKey(secret);
             String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
             log.info("deviceString: "+deviceString+", encyprted deviceString: "+deviceID);
             ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
-            if (response.wasSuccessful()) {
+            
+            if (response.wasSuccessful() && isUserRegistered(response, appID)) {
                 log.info("FA response user uuid: "+response.successResponse.user.id.toString()
                 +", username: "+response.successResponse.user.username);
                 from.setDeviceID(response.successResponse.user.id.toString());
@@ -239,6 +248,16 @@ public class ReactiveConsumer {
             xmsg.setFrom(null);
             return Mono.just(xmsg);
         }
+    }
+    
+    private Boolean isUserRegistered(ClientResponse<UserResponse, Errors> response, UUID appID) {
+    	List<UserRegistration> registrations = response.successResponse.user.getRegistrations();
+    	for(int i=0; i<registrations.size(); i++) {
+    		if(registrations.get(i).applicationId.equals(appID)) {
+    			return true;
+    		}
+    	}
+    	return false;
     }
     
     private Mono<XMessage> xmsgCampaignForm(XMessage xmsg, User user) {
