@@ -1,14 +1,11 @@
 package com.uci.orchestrator.Consumer;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.google.common.base.Objects;
 import com.inversoft.error.Errors;
 import com.inversoft.rest.ClientResponse;
-import org.apache.tomcat.util.json.ParseException;
 import com.uci.dao.models.XMessageDAO;
 import com.uci.dao.repository.XMessageRepository;
 import com.uci.utils.BotService;
@@ -17,6 +14,7 @@ import com.uci.utils.cache.service.RedisCacheService;
 import com.uci.utils.encryption.AESWrapper;
 import com.uci.utils.kafka.ReactiveProducer;
 import com.uci.utils.kafka.SimpleProducer;
+import com.uci.utils.service.UserService;
 
 import io.fusionauth.domain.api.UserConsentResponse;
 import io.fusionauth.domain.api.UserRequest;
@@ -29,6 +27,7 @@ import messagerosa.core.model.DeviceType;
 import messagerosa.core.model.SenderReceiverInfo;
 import messagerosa.core.model.Transformer;
 import messagerosa.core.model.XMessage;
+import messagerosa.core.model.XMessagePayload;
 import messagerosa.xml.XMessageParser;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.kafka.common.protocol.types.Field;
@@ -42,6 +41,7 @@ import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.util.FileCopyUtils;
 
@@ -93,12 +93,18 @@ public class ReactiveConsumer {
 
     @Value("${odk-transformer}")
     public String odkTransformerTopic;
+    
+    @Value("${broadcast-transformer}")
+    public String broadcastTransformerTopic;
 
     @Autowired
     public BotService botService;
 
     @Autowired
     public CampaignService campaignService;
+    
+    @Autowired
+    private UserService userService;
 
     @Value("${encryptionKeyString}")
     private String secret;
@@ -131,41 +137,50 @@ public class ReactiveConsumer {
                                 public void accept(String adapterID) {
                                     logTimeTaken(startTime, 3);
                                     from.setCampaignID(msg.getApp());
-                                    if(from.getDeviceType() == null) {
+                                     if(from.getDeviceType() == null) {
                                         from.setDeviceType(DeviceType.PHONE);
                                     }
-                                    botService.getBotIDFromBotName(msg.getApp()).doOnNext(new Consumer<String>() {
+                                    campaignService.getCampaignFromNameTransformer(msg.getApp()).doOnNext(new Consumer<JsonNode>() {
                                     	@Override
-                                        public void accept(String appId) {
+                                        public void accept(JsonNode campaign) {
+                                    		String appId = campaign.get("id").asText();
+                                            JsonNode firstTransformer = campaign.findValues("transformers").get(0).get(0);
+                                            log.info("firstTransformer: "+firstTransformer);
                                     		resolveUserNew(msg, appId)
-                                        	.doOnNext(new Consumer<XMessage>() {
-                                            @Override
-                                            public void accept(XMessage msg) {
-                                                SenderReceiverInfo from = msg.getFrom();
-                                                // msg.setFrom(from);
-                                                getLastMessageID(msg)
-                                                        .doOnNext(lastMessageID -> {
-                                                            logTimeTaken(startTime, 4);
-                                                            msg.setLastMessageID(lastMessageID);
-                                                            msg.setAdapterId(adapterID);
-                                                            if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
-                                                                try {
-                                                                    kafkaProducer.send(odkTransformerTopic, msg.toXML());
-                                                                    // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
-                                                                } catch (JAXBException e) {
-                                                                    e.printStackTrace();
-                                                                }
-                                                                logTimeTaken(startTime, 15);
-                                                            }
-                                                        })
-                                                        .doOnError(new Consumer<Throwable>() {
-                                                            @Override
-                                                            public void accept(Throwable throwable) {
-                                                                log.error("Error in getLastMessageID" + throwable.getMessage());
-                                                            }
-                                                        })
-                                                        .subscribe();
-                                            }
+	                                        	.doOnNext(new Consumer<XMessage>() {
+		                                            @Override
+		                                            public void accept(XMessage msg) {
+		                                                SenderReceiverInfo from = msg.getFrom();
+		                                                // msg.setFrom(from);
+		                                                getLastMessageID(msg)
+		                                                        .doOnNext(lastMessageID -> {
+		                                                            logTimeTaken(startTime, 4);
+		                                                            msg.setLastMessageID(lastMessageID);
+		                                                            msg.setAdapterId(adapterID);
+		                                                            if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
+		                                                                try {
+		                                                                	if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
+		                                                                		&& firstTransformer.get("type").asText().equals("broadcast")) {
+		                                                                		XMessage message = setXMessageMeta(msg, campaign, firstTransformer);
+		                                                                		kafkaProducer.send(broadcastTransformerTopic, message.toXML());
+		                                                                	} else {
+		                                                                		kafkaProducer.send(odkTransformerTopic, msg.toXML());
+		                                                                	}
+		                                                                    // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
+		                                                                } catch (JAXBException e) {
+		                                                                    e.printStackTrace();
+		                                                                }
+		                                                                logTimeTaken(startTime, 15);
+		                                                            }
+		                                                        })
+		                                                        .doOnError(new Consumer<Throwable>() {
+		                                                            @Override
+		                                                            public void accept(Throwable throwable) {
+		                                                                log.error("Error in getLastMessageID" + throwable.getMessage());
+		                                                            }
+		                                                        })
+		                                                        .subscribe();
+		                                            }
                                         })
                                         .doOnError(new Consumer<Throwable>() {
                                             @Override
@@ -198,6 +213,72 @@ public class ReactiveConsumer {
                     }
                 })
                 .subscribe();
+    }
+    
+    private XMessage setXMessageMeta(XMessage xMessage, JsonNode campaign, JsonNode transformer) {
+    	String campaignID = campaign.get("id").asText();
+    	
+    	/* Get federated users from federation services */
+        JSONArray users = userService.getUsersFromFederatedServers(campaignID);
+        
+    	/* Create request body data for user template message */
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode node = mapper.createObjectNode();
+    	node.put("body", transformer.get("meta").get("body").asText());
+    	node.put("type", transformer.get("meta").get("type").asText());
+    	node.put("user", transformer.get("meta").get("user").asText());
+    	
+    	ArrayNode sampleData = mapper.createArrayNode();
+    	for (int i = 0; i < users.length(); i++) {
+        	ObjectNode userData = mapper.createObjectNode();
+        	userData.put("task", "coding");
+        	userData.put("name", ((JSONObject) users.get(i)).getString("whatsapp_mobile_number"));
+        	userData.put("__index", i);
+        	sampleData.add(userData);
+    	}
+    	node.put("sampleData", sampleData);
+    	
+    	/* Fetch user messages by template from template service */
+    	ArrayList<JSONObject> usersMessage = userService.getUsersMessageByTemplate(node);
+        
+    	log.info("usersMessage: "+usersMessage);
+    	
+    	/* Set User messages against the user phone */
+    	ObjectNode federatedUsersMeta = mapper.createObjectNode();
+    	ArrayNode userMetaData = mapper.createArrayNode();
+        usersMessage.forEach(userMsg -> {
+    		int j = Integer.parseInt(userMsg.get("__index").toString());
+    		String userPhone = ((JSONObject) users.get(j)).getString("whatsapp_mobile_number");
+    		userPhone = "7597185708";
+           
+    		ObjectNode map = mapper.createObjectNode();
+    		map.put("phone", userPhone);
+    		map.put("message", userMsg.get("body").toString());
+            userMetaData.add(map);
+    		
+    		log.info("index: "+j+", body: "+userMsg.get("body").toString()+", phone:"+userPhone);
+    	});
+        
+        federatedUsersMeta.put("list", userMetaData);
+    	
+    	/* Set Transformer & its meta data in XMessage */
+    	HashMap<String, String> metaData = new HashMap<String, String>();
+    	metaData.put("id", transformer.get("id").asText());
+    	metaData.put("type", transformer.get("type") != null && !transformer.get("type").asText().isEmpty() 
+    							? transformer.get("type").asText()
+    							: "");
+    	metaData.put("federatedUsers", federatedUsersMeta.toString());
+    	
+    	Transformer transf = new Transformer();
+        transf.setId(transformer.get("id").asText());
+    	transf.setMetaData(metaData);
+    	
+    	ArrayList<Transformer> transformers = new ArrayList<Transformer>();
+        transformers.add(transf);
+        
+        xMessage.setTransformers(transformers);
+        
+        return xMessage;
     }
     
     private Mono<XMessage> resolveUserNew(XMessage xmsg, String appId) {
