@@ -13,6 +13,7 @@ import com.uci.dao.models.XMessageDAO;
 import com.uci.dao.repository.XMessageRepository;
 import com.uci.utils.BotService;
 import com.uci.utils.CampaignService;
+import com.uci.utils.cache.service.RedisCacheService;
 import com.uci.utils.encryption.AESWrapper;
 import com.uci.utils.kafka.ReactiveProducer;
 import com.uci.utils.kafka.SimpleProducer;
@@ -102,6 +103,9 @@ public class ReactiveConsumer {
     @Value("${encryptionKeyString}")
     private String secret;
 
+    @Autowired
+    private RedisCacheService redisCacheService;
+    
     public AESWrapper encryptor;
 
     private final String DEFAULT_APP_NAME = "Global Bot";
@@ -208,27 +212,30 @@ public class ReactiveConsumer {
             String encodedBase64Key = encodeKey(secret);
             String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
             log.info("deviceString: "+deviceString+", encyprted deviceString: "+deviceID);
-            ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
+            String userID = getFAUserIdForApp(deviceID, appID);
             
-            if (response.wasSuccessful() && isUserRegistered(response, appID)) {
-                log.info("FA response user uuid: "+response.successResponse.user.id.toString()
-                +", username: "+response.successResponse.user.username);
-                from.setDeviceID(response.successResponse.user.id.toString());
+            if (userID != null && !userID.isEmpty()) {
+            	log.info("Found FA user id");
+//                log.info("FA response user uuid: "+response.successResponse.user.id.toString()
+//                +", username: "+response.successResponse.user.username);
+                from.setDeviceID(userID);
                 from.setEncryptedDeviceID(deviceID);
                 xmsg.setFrom(from);
-                return xmsgCampaignForm(xmsg, response.successResponse.user);
+                return Mono.just(xmsg);
             } else {
                 return botService.updateUser(deviceString, appName)
                         .flatMap(new Function<Pair<Boolean, String>, Mono<XMessage>>() {
                             @Override
                             public Mono<XMessage> apply(Pair<Boolean, String> result) {
+                            	log.info("FA update user");
                                 if (result.getLeft()) {
                                     from.setDeviceID(result.getRight());
                                     from.setEncryptedDeviceID(deviceID);
                                     xmsg.setFrom(from);
                                     ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
-                                    if (response.wasSuccessful()) {
-                                        return xmsgCampaignForm(xmsg, response.successResponse.user);
+                                    if (response.wasSuccessful() && isUserRegistered(response, appID)) {
+                                    	redisCacheService.setFAUserIDForAppCache(getFACacheName(deviceID, appID), response.successResponse.user.id.toString());
+                                        return Mono.just(xmsg);
                                     } else {
                                         return Mono.just(xmsg);
                                     }
@@ -252,6 +259,35 @@ public class ReactiveConsumer {
         }
     }
     
+    /**
+     * Get Fusion Auth User's UUID for App
+     * @param deviceID
+     * @param appID
+     * @return
+     */
+    private String getFAUserIdForApp(String deviceID, UUID appID) {
+    	String userID = null;
+    
+    	Object result = redisCacheService.getFAUserIDForAppCache(getFACacheName(deviceID, appID));
+    	userID = result != null ? result.toString() : null;
+    	
+    	if(userID == null || userID.isEmpty()) {
+    		ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
+            
+            if (response.wasSuccessful() && isUserRegistered(response, appID)) {
+            	userID = response.successResponse.user.id.toString();
+            	redisCacheService.setFAUserIDForAppCache(getFACacheName(deviceID, appID), userID);
+            }
+    	}
+        return userID;
+    }
+    
+    /**
+     * Check if FA user is registered for appid
+     * @param response
+     * @param appID
+     * @return
+     */
     private Boolean isUserRegistered(ClientResponse<UserResponse, Errors> response, UUID appID) {
     	List<UserRegistration> registrations = response.successResponse.user.getRegistrations();
     	for(int i=0; i<registrations.size(); i++) {
@@ -260,6 +296,10 @@ public class ReactiveConsumer {
     		}
     	}
     	return false;
+    }
+    
+    private String getFACacheName(String deviceID, UUID appID) {
+    	return deviceID+"-"+appID.toString();
     }
     
     private Mono<XMessage> xmsgCampaignForm(XMessage xmsg, User user) {
@@ -458,41 +498,48 @@ public class ReactiveConsumer {
         return "mandatory-consent-v1";
     }
 
-    private Mono<SenderReceiverInfo> resolveUser(SenderReceiverInfo from, String appName) {
-        try {
-            String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
-            String encodedBase64Key = encodeKey(secret);
-            String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
-            ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
-            if (response.wasSuccessful()) {
-                from.setDeviceID(response.successResponse.user.id.toString());
-//                checkConsent(from.getCampaignID(), response.successResponse.user);
-                return Mono.just(from);
-            } else {
-                return botService.updateUser(deviceString, appName)
-                        .flatMap(new Function<Pair<Boolean, String>, Mono<SenderReceiverInfo>>() {
-                            @Override
-                            public Mono<SenderReceiverInfo> apply(Pair<Boolean, String> result) {
-                                if (result.getLeft()) {
-                                    from.setDeviceID(result.getRight());
-                                    return Mono.just(from);
-                                } else {
-                                    return Mono.just(null);
-                                }
-                            }
-                        }).doOnError(new Consumer<Throwable>() {
-                            @Override
-                            public void accept(Throwable throwable) {
-                                log.error("Error in updateUser" + throwable.getMessage());
-                            }
-                        });
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            log.error("Error in resolveUser" + e.getMessage());
-            return Mono.just(null);
-        }
-    }
+    /**
+     * NOT IN USE
+     * Save and get user data, authenticated by FA, 
+     * @param campaignID
+     * @param user
+     * @return
+     */
+//    private Mono<SenderReceiverInfo> resolveUser(SenderReceiverInfo from, String appName) {
+//        try {
+//            String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
+//            String encodedBase64Key = encodeKey(secret);
+//            String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
+//            ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
+//            if (response.wasSuccessful()) {
+//                from.setDeviceID(response.successResponse.user.id.toString());
+////                checkConsent(from.getCampaignID(), response.successResponse.user);
+//                return Mono.just(from);
+//            } else {
+//                return botService.updateUser(deviceString, appName)
+//                        .flatMap(new Function<Pair<Boolean, String>, Mono<SenderReceiverInfo>>() {
+//                            @Override
+//                            public Mono<SenderReceiverInfo> apply(Pair<Boolean, String> result) {
+//                                if (result.getLeft()) {
+//                                    from.setDeviceID(result.getRight());
+//                                    return Mono.just(from);
+//                                } else {
+//                                    return Mono.just(null);
+//                                }
+//                            }
+//                        }).doOnError(new Consumer<Throwable>() {
+//                            @Override
+//                            public void accept(Throwable throwable) {
+//                                log.error("Error in updateUser" + throwable.getMessage());
+//                            }
+//                        });
+//            }
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//            log.error("Error in resolveUser" + e.getMessage());
+//            return Mono.just(null);
+//        }
+//    }
     
     private Boolean checkUserCampaignConsent(String campaignID, User user) {
         Boolean consent = false;
