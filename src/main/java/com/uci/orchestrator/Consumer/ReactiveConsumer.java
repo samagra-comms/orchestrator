@@ -231,7 +231,7 @@ public class ReactiveConsumer {
     	ArrayNode sampleData = mapper.createArrayNode();
     	for (int i = 0; i < users.length(); i++) {
         	ObjectNode userData = mapper.createObjectNode();
-        	userData.put("task", "coding");
+        	userData.put("country", "india");
         	userData.put("name", ((JSONObject) users.get(i)).getString("whatsapp_mobile_number"));
         	userData.put("__index", i);
         	sampleData.add(userData);
