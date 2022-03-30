@@ -157,6 +157,10 @@ public class ReactiveConsumer {
 		                                                            logTimeTaken(startTime, 4);
 		                                                            msg.setLastMessageID(lastMessageID);
 		                                                            msg.setAdapterId(adapterID);
+		                                                            
+		                                                            /* Switch From & To */
+		                                                            switchFromTo(msg);
+		                                                            
 		                                                            if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
 		                                                                try {
 		                                                                	if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
@@ -813,5 +817,16 @@ public class ReactiveConsumer {
                 }
             }
         }
+    }
+    
+    /**
+     * Switch from & To in XMessage
+     * @param xMessage
+     */
+    private void switchFromTo(XMessage xMessage) {
+        SenderReceiverInfo from = xMessage.getFrom();
+        SenderReceiverInfo to = xMessage.getTo();
+        xMessage.setFrom(to);
+        xMessage.setTo(from);
     }
 }
