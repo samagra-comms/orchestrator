@@ -1,6 +1,6 @@
 package com.uci.orchestrator.Application;
 
-import com.uci.dao.service.HealthService;
+import com.github.benmanes.caffeine.cache.Cache;
 import com.uci.orchestrator.Drools.DroolsBeanFactory;
 import com.uci.utils.CampaignService;
 import com.uci.utils.kafka.ReactiveProducer;
@@ -10,10 +10,14 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.kie.api.io.Resource;
 import org.kie.api.runtime.KieSession;
 import org.kie.internal.io.ResourceFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
@@ -28,6 +32,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 @Configuration
+@EnableCaching
 public class AppConfigOrchestrator {
 
     @Value("${spring.kafka.bootstrap-servers}")
@@ -46,6 +51,9 @@ public class AppConfigOrchestrator {
 
     @Value("${fusionauth.key}")
     public String FUSIONAUTH_KEY;
+    
+    @Autowired
+    public Cache<Object, Object> cache;
 
     @Bean
     public FusionAuthClient getFAClient() {
@@ -59,7 +67,7 @@ public class AppConfigOrchestrator {
                 .defaultHeader("admin-token", CAMPAIGN_ADMIN_TOKEN)
                 .build();
         FusionAuthClient fusionAuthClient = getFAClient();
-        return new CampaignService(webClient, fusionAuthClient);
+        return new CampaignService(webClient, fusionAuthClient, cache);
     }
 
     @Bean
@@ -86,6 +94,7 @@ public class AppConfigOrchestrator {
         configuration.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
         configuration.put(ProducerConfig.CLIENT_ID_CONFIG, "sample-producer");
         configuration.put(ProducerConfig.ACKS_CONFIG, "all");
+        configuration.put(org.springframework.kafka.support.serializer.JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
         configuration.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, org.springframework.kafka.support.serializer.JsonSerializer.class);
         configuration.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, org.springframework.kafka.support.serializer.JsonSerializer.class);
         return configuration;
@@ -96,7 +105,7 @@ public class AppConfigOrchestrator {
         ReceiverOptions<String, String> options = ReceiverOptions.create(kafkaConsumerConfiguration());
         return options.subscription(Arrays.asList(inTopicName))
                 .withKeyDeserializer(new JsonDeserializer<>())
-                .withValueDeserializer(new JsonDeserializer());
+                .withValueDeserializer(new JsonDeserializer(String.class));
     }
 
     @Bean
@@ -117,6 +126,18 @@ public class AppConfigOrchestrator {
     @Bean
     ReactiveProducer kafkaReactiveProducer() {
         return new ReactiveProducer();
+    }
+    
+    @Bean
+    ProducerFactory<String, String> producerFactory(){
+    	ProducerFactory<String, String> producerFactory = new DefaultKafkaProducerFactory<>(kafkaProducerConfiguration());
+    	return producerFactory;
+    }
+    
+    @Bean
+    KafkaTemplate<String, String> kafkaTemplate() {
+    	KafkaTemplate<String, String> kafkaTemplate = new KafkaTemplate<>(producerFactory());
+    	return (KafkaTemplate<String, String>) kafkaTemplate;
     }
     
 //    @Bean

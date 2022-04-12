@@ -47,7 +47,7 @@ public class ServiceStatusController {
     @RequestMapping(value = "/health/kafka", method = RequestMethod.GET, produces = { "application/json", "text/json" })
     public ResponseEntity<JsonNode> kafkaStatusCheck() throws IOException, JsonProcessingException {
     	JsonNode jsonNode = getResponseJsonNode();
-    	((ObjectNode) jsonNode).put("result", healthService.getKafkaHealthNode());
+//    	((ObjectNode) jsonNode).put("result", healthService.getKafkaHealthNode());
         
         return ResponseEntity.ok(jsonNode);
     }
@@ -60,23 +60,23 @@ public class ServiceStatusController {
         return ResponseEntity.ok(jsonNode);
     }
     
-    private static final Logger logger = LogManager.getLogger();
-    
-    /*
-	 * Test with default kafka appender 
-	 * telemetry object build internally via custom layout mentioned in xml by sent message
-	 */
-	@RequestMapping(value = "/test/logs", method = RequestMethod.GET, produces = { "application/json", "text/json" })
-	public ResponseEntity<JsonNode> testKafkaLogAppender() throws JsonProcessingException, IOException {
-		ObjectMapper mapper = new ObjectMapper();
-		JsonNode jsonNode = mapper.readTree("{\"responseCode\":\"OK\"}");
-
-		logger.info("Info Test Message");
-
-		logger.error("Error Test Message");
-
-		return ResponseEntity.ok(jsonNode);
-	}
+//    private static final Logger logger = LogManager.getLogger();
+//    
+//    /*
+//	 * Test with default kafka appender 
+//	 * telemetry object build internally via custom layout mentioned in xml by sent message
+//	 */
+//	@RequestMapping(value = "/test/logs", method = RequestMethod.GET, produces = { "application/json", "text/json" })
+//	public ResponseEntity<JsonNode> testKafkaLogAppender() throws JsonProcessingException, IOException {
+//		ObjectMapper mapper = new ObjectMapper();
+//		JsonNode jsonNode = mapper.readTree("{\"responseCode\":\"OK\"}");
+//
+//		logger.info("Info Test Message");
+//
+//		logger.error("Error Test Message");
+//
+//		return ResponseEntity.ok(jsonNode);
+//	}
     
     /**
      * Returns json node for service response
