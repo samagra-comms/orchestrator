@@ -51,7 +51,13 @@ public class AppConfigOrchestrator {
 
     @Value("${fusionauth.key}")
     public String FUSIONAUTH_KEY;
-    
+
+    @Value("${processOutbound}")
+    private String processOutboundTopic;
+
+    @Value("${inboundProcessed}")
+    private String inboundProcessedTopic;
+
     @Autowired
     public Cache<Object, Object> cache;
 
@@ -101,8 +107,10 @@ public class AppConfigOrchestrator {
     }
 
     @Bean
-    ReceiverOptions<String, String> kafkaReceiverOptions(@Value("${inboundProcessed}") String[] inTopicName) {
+    ReceiverOptions<String, String> kafkaReceiverOptions() {
         ReceiverOptions<String, String> options = ReceiverOptions.create(kafkaConsumerConfiguration());
+        String[] inTopicName = new String[]{inboundProcessedTopic, processOutboundTopic};
+
         return options.subscription(Arrays.asList(inTopicName))
                 .withKeyDeserializer(new JsonDeserializer<>())
                 .withValueDeserializer(new JsonDeserializer(String.class));

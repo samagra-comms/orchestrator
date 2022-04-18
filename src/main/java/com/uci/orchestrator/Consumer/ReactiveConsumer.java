@@ -41,7 +41,9 @@ import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.lang.Nullable;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 import org.springframework.util.FileCopyUtils;
 
@@ -111,112 +113,97 @@ public class ReactiveConsumer {
 
     @Autowired
     private RedisCacheService redisCacheService;
-    
+
     public AESWrapper encryptor;
 
     private final String DEFAULT_APP_NAME = "Global Bot";
     LocalDateTime yesterday = LocalDateTime.now().minusDays(1L);
 
     
-    @EventListener(ApplicationStartedEvent.class)
-    public void onMessage() {
-        
-        reactiveKafkaReceiver
-                .doOnNext(new Consumer<ReceiverRecord<String, String>>() {
-                    @Override
-                    public void accept(ReceiverRecord<String, String> stringMessage) {
-                        try {
-                            final long startTime = System.nanoTime();
-                            logTimeTaken(startTime, 0);
-                            XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.value().getBytes()));
-                            SenderReceiverInfo from = msg.getFrom();
-                            logTimeTaken(startTime, 1);
-                            fetchAdapterID(msg.getApp())
-                            .doOnNext(new Consumer<String>() {
+    @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
+    public void onMessage(@Payload String stringMessage) {
+        try {
+            final long startTime = System.nanoTime();
+            logTimeTaken(startTime, 0);
+            XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.getBytes()));
+            SenderReceiverInfo from = msg.getFrom();
+            logTimeTaken(startTime, 1);
+            fetchAdapterID(msg.getApp())
+                    .doOnNext(new Consumer<String>() {
+                        @Override
+                        public void accept(String adapterID) {
+                            logTimeTaken(startTime, 3);
+                            from.setCampaignID(msg.getApp());
+                            if(from.getDeviceType() == null) {
+                                from.setDeviceType(DeviceType.PHONE);
+                            }
+                            campaignService.getCampaignFromNameTransformer(msg.getApp()).doOnNext(new Consumer<JsonNode>() {
                                 @Override
-                                public void accept(String adapterID) {
-                                    logTimeTaken(startTime, 3);
-                                    from.setCampaignID(msg.getApp());
-                                     if(from.getDeviceType() == null) {
-                                        from.setDeviceType(DeviceType.PHONE);
-                                    }
-                                    campaignService.getCampaignFromNameTransformer(msg.getApp()).doOnNext(new Consumer<JsonNode>() {
-                                    	@Override
-                                        public void accept(JsonNode campaign) {
-                                    		String appId = campaign.get("id").asText();
-                                            JsonNode firstTransformer = campaign.findValues("transformers").get(0).get(0);
-                                            log.info("firstTransformer: "+firstTransformer);
-                                    		resolveUserNew(msg, appId)
-	                                        	.doOnNext(new Consumer<XMessage>() {
-		                                            @Override
-		                                            public void accept(XMessage msg) {
-		                                                SenderReceiverInfo from = msg.getFrom();
-		                                                // msg.setFrom(from);
-		                                                getLastMessageID(msg)
-		                                                        .doOnNext(lastMessageID -> {
-		                                                            logTimeTaken(startTime, 4);
-		                                                            msg.setLastMessageID(lastMessageID);
-		                                                            msg.setAdapterId(adapterID);
-		                                                            
-		                                                            /* Switch From & To */
-		                                                            switchFromTo(msg);
-		                                                            
-		                                                            if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
-		                                                                try {
-		                                                                	if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
-		                                                                		&& firstTransformer.get("type").asText().equals("broadcast")) {
-		                                                                		XMessage message = setXMessageMeta(msg, campaign, firstTransformer);
-		                                                                		kafkaProducer.send(broadcastTransformerTopic, message.toXML());
-		                                                                	} else {
-		                                                                		kafkaProducer.send(odkTransformerTopic, msg.toXML());
-		                                                                	}
-		                                                                    // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
-		                                                                } catch (JAXBException e) {
-		                                                                    e.printStackTrace();
-		                                                                }
-		                                                                logTimeTaken(startTime, 15);
-		                                                            }
-		                                                        })
-		                                                        .doOnError(new Consumer<Throwable>() {
-		                                                            @Override
-		                                                            public void accept(Throwable throwable) {
-		                                                                log.error("Error in getLastMessageID" + throwable.getMessage());
-		                                                            }
-		                                                        })
-		                                                        .subscribe();
-		                                            }
-                                        })
-                                        .doOnError(new Consumer<Throwable>() {
-                                            @Override
-                                            public void accept(Throwable throwable) {
-                                                log.error("Error in resolveUser" + throwable.getMessage());
-                                            }
-                                        }).subscribe();
-                                    	}
-                                        
-                                    }).subscribe();
+                                public void accept(JsonNode campaign) {
+                                    String appId = campaign.get("id").asText();
+                                    JsonNode firstTransformer = campaign.findValues("transformers").get(0).get(0);
+                                    log.info("firstTransformer: "+firstTransformer);
+                                    resolveUserNew(msg, appId)
+                                            .doOnNext(new Consumer<XMessage>() {
+                                                @Override
+                                                public void accept(XMessage msg) {
+                                                    SenderReceiverInfo from = msg.getFrom();
+                                                    // msg.setFrom(from);
+                                                    getLastMessageID(msg)
+                                                            .doOnNext(lastMessageID -> {
+                                                                logTimeTaken(startTime, 4);
+                                                                msg.setLastMessageID(lastMessageID);
+                                                                msg.setAdapterId(adapterID);
+
+                                                                /* Switch From & To */
+                                                                switchFromTo(msg);
+
+                                                                if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
+                                                                    try {
+                                                                        if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
+                                                                                && firstTransformer.get("type").asText().equals("broadcast")) {
+                                                                            XMessage message = setXMessageMeta(msg, campaign, firstTransformer);
+                                                                            kafkaProducer.send(broadcastTransformerTopic, message.toXML());
+                                                                        } else {
+                                                                            kafkaProducer.send(odkTransformerTopic, msg.toXML());
+                                                                        }
+                                                                        // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
+                                                                    } catch (JAXBException e) {
+                                                                        e.printStackTrace();
+                                                                    }
+                                                                    logTimeTaken(startTime, 15);
+                                                                }
+                                                            })
+                                                            .doOnError(new Consumer<Throwable>() {
+                                                                @Override
+                                                                public void accept(Throwable throwable) {
+                                                                    log.error("Error in getLastMessageID" + throwable.getMessage());
+                                                                }
+                                                            })
+                                                            .subscribe();
+                                                }
+                                            })
+                                            .doOnError(new Consumer<Throwable>() {
+                                                @Override
+                                                public void accept(Throwable throwable) {
+                                                    log.error("Error in resolveUser" + throwable.getMessage());
+                                                }
+                                            }).subscribe();
                                 }
-                            })
-                            .doOnError(new Consumer<Throwable>() {
-                                @Override
-                                public void accept(Throwable throwable) {
-                                    log.error("Error in fetchAdapterID" + throwable.getMessage());
-                                }
-                            })
-                            .subscribe();
-                        } catch (Exception e) {
-                            e.printStackTrace();
+
+                            }).subscribe();
                         }
-                    }
-                })
-                .doOnError(new Consumer<Throwable>() {
-                    @Override
-                    public void accept(Throwable e) {
-                        System.out.println(e.getMessage());
-                        log.error("KafkaFlux exception", e);
-                    }
-                })
-                .subscribe();
+                    })
+                    .doOnError(new Consumer<Throwable>() {
+                        @Override
+                        public void accept(Throwable throwable) {
+                            log.error("Error in fetchAdapterID" + throwable.getMessage());
+                        }
+                    })
+                    .subscribe();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
     
     private XMessage setXMessageMeta(XMessage xMessage, JsonNode campaign, JsonNode transformer) {
