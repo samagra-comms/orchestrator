@@ -21,6 +21,7 @@ import io.fusionauth.domain.api.UserRequest;
 import io.fusionauth.domain.api.UserResponse;
 import io.fusionauth.domain.User;
 import io.fusionauth.domain.UserRegistration;
+import io.r2dbc.postgresql.codec.Json;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import messagerosa.core.model.DeviceType;
@@ -140,10 +141,13 @@ public class ReactiveConsumer {
                             campaignService.getCampaignFromNameTransformer(msg.getApp()).doOnNext(new Consumer<JsonNode>() {
                                 @Override
                                 public void accept(JsonNode campaign) {
+                                    /* Set XMessage Transformers */
+                                    XMessage message = setXMessageTransformers(msg, campaign);
+
                                     String appId = campaign.get("id").asText();
                                     JsonNode firstTransformer = campaign.findValues("transformers").get(0).get(0);
-                                    log.info("firstTransformer: "+firstTransformer);
-                                    resolveUserNew(msg, appId)
+
+                                    resolveUserNew(message, appId)
                                             .doOnNext(new Consumer<XMessage>() {
                                                 @Override
                                                 public void accept(XMessage msg) {
@@ -160,10 +164,10 @@ public class ReactiveConsumer {
 
                                                                 if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
                                                                     try {
+                                                                        log.info("final msg.toXML(): "+msg.toXML().toString());
                                                                         if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
                                                                                 && firstTransformer.get("type").asText().equals("broadcast")) {
-                                                                            XMessage message = setXMessageMeta(msg, campaign, firstTransformer);
-                                                                            kafkaProducer.send(broadcastTransformerTopic, message.toXML());
+                                                                            kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
                                                                         } else {
                                                                             kafkaProducer.send(odkTransformerTopic, msg.toXML());
                                                                         }
@@ -205,8 +209,59 @@ public class ReactiveConsumer {
             e.printStackTrace();
         }
     }
-    
-    private XMessage setXMessageMeta(XMessage xMessage, JsonNode campaign, JsonNode transformer) {
+
+    /**
+     * Set Transformer in XMessage with transformer required data in meta
+     * @param xMessage
+     * @param campaign
+     * @return XMessage
+     */
+    private XMessage setXMessageTransformers(XMessage xMessage, JsonNode campaign) {
+        ArrayList<Transformer> transformers = new ArrayList<Transformer>();
+
+        ArrayList transformerList = (ArrayList) campaign.findValues("transformers");
+        transformerList.forEach(transformerTmp -> {
+            JsonNode transformerNode = (JsonNode) transformerTmp;
+            int i=0;
+            while(transformerNode.get(i) != null) {
+                JsonNode transformer = transformerNode.get(i);
+                log.info("transformer:"+transformer);
+
+                HashMap<String, String> metaData = new HashMap<String, String>();
+                metaData.put("id", transformer.get("id").asText());
+                metaData.put("type", transformer.get("type") != null && !transformer.get("type").asText().isEmpty()
+                        ? transformer.get("type").asText()
+                        : "");
+                metaData.put("formID", transformer.findValue("formID") != null && !transformer.findValue("formID").asText().isEmpty()
+                        ? transformer.findValue("formID").asText()
+                        : "");
+                metaData.put("startingMessage", campaign.findValue("startingMessage").asText());
+                metaData.put("botId", campaign.findValue("id").asText());
+                metaData.put("botOwnerOrgID", campaign.findValue("ownerOrgID").asText());
+                if(transformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
+                        && transformer.get("type").asText().equals("broadcast")) {
+                    metaData.put("federatedUsers", getFederatedUsersMeta(campaign, transformer));
+                }
+
+                Transformer transf = new Transformer();
+                transf.setId(transformer.get("id").asText());
+                transf.setMetaData(metaData);
+
+                transformers.add(transf);
+                i++;
+            }
+        });
+        xMessage.setTransformers(transformers);
+        return xMessage;
+    }
+
+    /**
+     * Get Federated Users Data for Broadcast transformer
+     * @param campaign
+     * @param transformer
+     * @return Federated users as json string
+     */
+    private String getFederatedUsersMeta(JsonNode campaign, JsonNode transformer) {
     	String campaignID = campaign.get("id").asText();
     	
     	/* Get federated users from federation services */
@@ -252,26 +307,10 @@ public class ReactiveConsumer {
         	});
             
             federatedUsersMeta.put("list", userMetaData);
-        	
-        	/* Set Transformer & its meta data in XMessage */
-        	HashMap<String, String> metaData = new HashMap<String, String>();
-        	metaData.put("id", transformer.get("id").asText());
-        	metaData.put("type", transformer.get("type") != null && !transformer.get("type").asText().isEmpty() 
-        							? transformer.get("type").asText()
-        							: "");
-        	metaData.put("federatedUsers", federatedUsersMeta.toString());
-        	
-        	Transformer transf = new Transformer();
-            transf.setId(transformer.get("id").asText());
-        	transf.setMetaData(metaData);
-        	
-        	ArrayList<Transformer> transformers = new ArrayList<Transformer>();
-            transformers.add(transf);
-            
-            xMessage.setTransformers(transformers);
+
+            return federatedUsersMeta.toString();
         }
-        
-        return xMessage;
+        return "";
     }
     
     private Mono<XMessage> resolveUserNew(XMessage xmsg, String appId) {
