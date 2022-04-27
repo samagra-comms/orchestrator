@@ -19,6 +19,25 @@
 		<java.version>11</java.version>
 	</properties>
 
+	<!-- For Downloading repositories from github packages -->
+	<repositories>
+		<repository>
+			<id>github-utils</id>
+			<name>GitHub Packages</name>
+			<url>https://maven.pkg.github.com/samagra-comms/utils</url>
+		</repository>
+		<repository>
+			<id>github-dao</id>
+			<name>GitHub Packages</name>
+			<url>https://maven.pkg.github.com/samagra-comms/dao</url>
+		</repository>
+		<repository>
+			<id>github-message-rosa</id>
+			<name>GitHub Packages</name>
+			<url>https://maven.pkg.github.com/samagra-comms/message-rosa</url>
+		</repository>
+	</repositories>
+
 	<dependencies>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -90,7 +109,7 @@
 		<dependency>
 			<groupId>com.uci</groupId>
 			<artifactId>dao</artifactId>
-			<version>1.0</version>
+			<version>0.0.1</version>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -103,12 +122,12 @@
 		<dependency>
 			<groupId>com.uci</groupId>
 			<artifactId>message-rosa</artifactId>
-			<version>0.0.1-SNAPSHOT</version>
+			<version>0.0.1</version>
 		</dependency>
 		<dependency>
 			<groupId>com.uci</groupId>
 			<artifactId>utils</artifactId>
-			<version>0.0.1-SNAPSHOT</version>
+			<version>0.0.3</version>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
