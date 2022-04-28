@@ -1,32 +1,33 @@
 package com.uci.orchestrator.Consumer;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.google.common.base.Objects;
 import com.inversoft.error.Errors;
 import com.inversoft.rest.ClientResponse;
-import org.apache.tomcat.util.json.ParseException;
 import com.uci.dao.models.XMessageDAO;
 import com.uci.dao.repository.XMessageRepository;
 import com.uci.utils.BotService;
 import com.uci.utils.CampaignService;
+import com.uci.utils.cache.service.RedisCacheService;
 import com.uci.utils.encryption.AESWrapper;
 import com.uci.utils.kafka.ReactiveProducer;
 import com.uci.utils.kafka.SimpleProducer;
+import com.uci.utils.service.UserService;
 
 import io.fusionauth.domain.api.UserConsentResponse;
 import io.fusionauth.domain.api.UserRequest;
 import io.fusionauth.domain.api.UserResponse;
 import io.fusionauth.domain.User;
+import io.fusionauth.domain.UserRegistration;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import messagerosa.core.model.DeviceType;
 import messagerosa.core.model.SenderReceiverInfo;
 import messagerosa.core.model.Transformer;
 import messagerosa.core.model.XMessage;
+import messagerosa.core.model.XMessagePayload;
 import messagerosa.xml.XMessageParser;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.kafka.common.protocol.types.Field;
@@ -40,6 +41,7 @@ import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Component;
 import org.springframework.util.FileCopyUtils;
 
@@ -91,16 +93,25 @@ public class ReactiveConsumer {
 
     @Value("${odk-transformer}")
     public String odkTransformerTopic;
+    
+    @Value("${broadcast-transformer}")
+    public String broadcastTransformerTopic;
 
     @Autowired
     public BotService botService;
 
     @Autowired
     public CampaignService campaignService;
+    
+    @Autowired
+    private UserService userService;
 
     @Value("${encryptionKeyString}")
     private String secret;
 
+    @Autowired
+    private RedisCacheService redisCacheService;
+    
     public AESWrapper encryptor;
 
     private final String DEFAULT_APP_NAME = "Global Bot";
@@ -109,6 +120,7 @@ public class ReactiveConsumer {
     
     @EventListener(ApplicationStartedEvent.class)
     public void onMessage() {
+        
         reactiveKafkaReceiver
                 .doOnNext(new Consumer<ReceiverRecord<String, String>>() {
                     @Override
@@ -119,77 +131,79 @@ public class ReactiveConsumer {
                             XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.value().getBytes()));
                             SenderReceiverInfo from = msg.getFrom();
                             logTimeTaken(startTime, 1);
-                            getAppName(msg.getPayload().getText(), msg.getFrom())
-                                    .doOnNext(new Consumer<String>() {
-                                        @Override
-                                        public void accept(String appName) {
-                                            logTimeTaken(startTime, 2);
-                                            msg.setApp(appName);
-                                            fetchAdapterID(appName)
-                                                    .doOnNext(new Consumer<String>() {
-                                                        @Override
-                                                        public void accept(String adapterID) {
-                                                            logTimeTaken(startTime, 3);
-
-                                                            from.setCampaignID(appName);
-                                                            from.setDeviceType(DeviceType.PHONE);
-                                                            resolveUserNew(msg)
-                                                                    .doOnNext(new Consumer<XMessage>() {
-                                                                        @Override
-                                                                        public void accept(XMessage msg) {
-                                                                        	SenderReceiverInfo from = msg.getFrom();
-                                                                            // msg.setFrom(from);
-                                                                            msg.setApp(appName);
-                                                                            getLastMessageID(msg)
-                                                                                    .doOnNext(lastMessageID -> {
-                                                                                        logTimeTaken(startTime, 4);
-                                                                                        msg.setLastMessageID(lastMessageID);
-                                                                                        msg.setAdapterId(adapterID);
-                                                                                        if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
-                                                                                            try {
-                                                                                                kafkaProducer.send(odkTransformerTopic, msg.toXML());
-                                                                                                // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
-                                                                                            } catch (JAXBException e) {
-                                                                                                e.printStackTrace();
-                                                                                            }
-                                                                                            logTimeTaken(startTime, 15);
-                                                                                        }
-                                                                                    })
-                                                                                    .doOnError(new Consumer<Throwable>() {
-                                                                                        @Override
-                                                                                        public void accept(Throwable throwable) {
-                                                                                            log.error("Error in getLastMessageID" + throwable.getMessage());
-                                                                                        }
-                                                                                    })
-                                                                                    .subscribe();
-                                                                        }
-                                                                    })
-                                                                    .doOnError(new Consumer<Throwable>() {
-                                                                        @Override
-                                                                        public void accept(Throwable throwable) {
-                                                                            log.error("Error in resolveUser" + throwable.getMessage());
-                                                                        }
-                                                                    })
-                                                                    .subscribe();
-
-                                                        }
-                                                    })
-                                                    .doOnError(new Consumer<Throwable>() {
-                                                        @Override
-                                                        public void accept(Throwable throwable) {
-                                                            log.error("Error in fetchAdapterID" + throwable.getMessage());
-                                                        }
-                                                    })
-                                                    .subscribe();
-                                        }
-                                    })
-                                    .doOnError(new Consumer<Throwable>() {
-                                        @Override
-                                        public void accept(Throwable throwable) {
-                                            log.error("Error in getAppName" + throwable.getMessage());
-                                        }
-                                    })
-                                    .subscribe();
+                            fetchAdapterID(msg.getApp())
+                            .doOnNext(new Consumer<String>() {
+                                @Override
+                                public void accept(String adapterID) {
+                                    logTimeTaken(startTime, 3);
+                                    from.setCampaignID(msg.getApp());
+                                     if(from.getDeviceType() == null) {
+                                        from.setDeviceType(DeviceType.PHONE);
+                                    }
+                                    campaignService.getCampaignFromNameTransformer(msg.getApp()).doOnNext(new Consumer<JsonNode>() {
+                                    	@Override
+                                        public void accept(JsonNode campaign) {
+                                    		String appId = campaign.get("id").asText();
+                                            JsonNode firstTransformer = campaign.findValues("transformers").get(0).get(0);
+                                            log.info("firstTransformer: "+firstTransformer);
+                                    		resolveUserNew(msg, appId)
+	                                        	.doOnNext(new Consumer<XMessage>() {
+		                                            @Override
+		                                            public void accept(XMessage msg) {
+		                                                SenderReceiverInfo from = msg.getFrom();
+		                                                // msg.setFrom(from);
+		                                                getLastMessageID(msg)
+		                                                        .doOnNext(lastMessageID -> {
+		                                                            logTimeTaken(startTime, 4);
+		                                                            msg.setLastMessageID(lastMessageID);
+		                                                            msg.setAdapterId(adapterID);
+		                                                            
+		                                                            /* Switch From & To */
+		                                                            switchFromTo(msg);
+		                                                            
+		                                                            if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
+		                                                                try {
+		                                                                	if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
+		                                                                		&& firstTransformer.get("type").asText().equals("broadcast")) {
+		                                                                		XMessage message = setXMessageMeta(msg, campaign, firstTransformer);
+		                                                                		kafkaProducer.send(broadcastTransformerTopic, message.toXML());
+		                                                                	} else {
+		                                                                		kafkaProducer.send(odkTransformerTopic, msg.toXML());
+		                                                                	}
+		                                                                    // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
+		                                                                } catch (JAXBException e) {
+		                                                                    e.printStackTrace();
+		                                                                }
+		                                                                logTimeTaken(startTime, 15);
+		                                                            }
+		                                                        })
+		                                                        .doOnError(new Consumer<Throwable>() {
+		                                                            @Override
+		                                                            public void accept(Throwable throwable) {
+		                                                                log.error("Error in getLastMessageID" + throwable.getMessage());
+		                                                            }
+		                                                        })
+		                                                        .subscribe();
+		                                            }
+                                        })
+                                        .doOnError(new Consumer<Throwable>() {
+                                            @Override
+                                            public void accept(Throwable throwable) {
+                                                log.error("Error in resolveUser" + throwable.getMessage());
+                                            }
+                                        }).subscribe();
+                                    	}
+                                        
+                                    }).subscribe();
+                                }
+                            })
+                            .doOnError(new Consumer<Throwable>() {
+                                @Override
+                                public void accept(Throwable throwable) {
+                                    log.error("Error in fetchAdapterID" + throwable.getMessage());
+                                }
+                            })
+                            .subscribe();
                         } catch (Exception e) {
                             e.printStackTrace();
                         }
@@ -205,35 +219,115 @@ public class ReactiveConsumer {
                 .subscribe();
     }
     
-    private Mono<XMessage> resolveUserNew(XMessage xmsg) {
-        try {
-        	SenderReceiverInfo from = xmsg.getFrom();
-        	String appName = xmsg.getApp();
+    private XMessage setXMessageMeta(XMessage xMessage, JsonNode campaign, JsonNode transformer) {
+    	String campaignID = campaign.get("id").asText();
+    	
+    	/* Get federated users from federation services */
+        JSONArray users = userService.getUsersFromFederatedServers(campaignID);
+        
+        if(users != null) {
+        	/* Create request body data for user template message */
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectNode node = mapper.createObjectNode();
+        	node.put("body", transformer.get("meta").get("body").asText());
+        	node.put("type", transformer.get("meta").get("type").asText());
+        	node.put("user", transformer.get("meta").get("user").asText());
         	
-        	String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
+        	ArrayNode sampleData = mapper.createArrayNode();
+        	for (int i = 0; i < users.length(); i++) {
+            	ObjectNode userData = mapper.createObjectNode();
+            	userData.put("task", "coding");
+            	userData.put("name", ((JSONObject) users.get(i)).getString("whatsapp_mobile_number"));
+            	userData.put("__index", i);
+            	sampleData.add(userData);
+        	}
+        	node.put("sampleData", sampleData);
+        	
+        	/* Fetch user messages by template from template service */
+        	ArrayList<JSONObject> usersMessage = userService.getUsersMessageByTemplate(node);
+            
+        	log.info("usersMessage: "+usersMessage);
+        	
+        	/* Set User messages against the user phone */
+        	ObjectNode federatedUsersMeta = mapper.createObjectNode();
+        	ArrayNode userMetaData = mapper.createArrayNode();
+            usersMessage.forEach(userMsg -> {
+        		int j = Integer.parseInt(userMsg.get("__index").toString());
+        		String userPhone = ((JSONObject) users.get(j)).getString("whatsapp_mobile_number");
+        		userPhone = "7597185708";
+               
+        		ObjectNode map = mapper.createObjectNode();
+        		map.put("phone", userPhone);
+        		map.put("message", userMsg.get("body").toString());
+                userMetaData.add(map);
+        		
+        		log.info("index: "+j+", body: "+userMsg.get("body").toString()+", phone:"+userPhone);
+        	});
+            
+            federatedUsersMeta.put("list", userMetaData);
+        	
+        	/* Set Transformer & its meta data in XMessage */
+        	HashMap<String, String> metaData = new HashMap<String, String>();
+        	metaData.put("id", transformer.get("id").asText());
+        	metaData.put("type", transformer.get("type") != null && !transformer.get("type").asText().isEmpty() 
+        							? transformer.get("type").asText()
+        							: "");
+        	metaData.put("federatedUsers", federatedUsersMeta.toString());
+        	
+        	Transformer transf = new Transformer();
+            transf.setId(transformer.get("id").asText());
+        	transf.setMetaData(metaData);
+        	
+        	ArrayList<Transformer> transformers = new ArrayList<Transformer>();
+            transformers.add(transf);
+            
+            xMessage.setTransformers(transformers);
+        }
+        
+        return xMessage;
+    }
+    
+    private Mono<XMessage> resolveUserNew(XMessage xmsg, String appId) {
+        try {
+            SenderReceiverInfo from = xmsg.getFrom();
+            String appName = xmsg.getApp();
+            Boolean found = false;
+            
+            UUID appID = UUID.fromString(appId);
+            
+            String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
             String encodedBase64Key = encodeKey(secret);
             String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
-            ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
-            if (response.wasSuccessful()) {
-                from.setDeviceID(response.successResponse.user.id.toString());
+            log.info("deviceString: "+deviceString+", encyprted deviceString: "+deviceID);
+            String userID = getFAUserIdForApp(deviceID, appID);
+            
+            if (userID != null && !userID.isEmpty()) {
+            	log.info("Found FA user id");
+//                log.info("FA response user uuid: "+response.successResponse.user.id.toString()
+//                +", username: "+response.successResponse.user.username);
+                from.setDeviceID(userID);
+                from.setEncryptedDeviceID(deviceID);
                 xmsg.setFrom(from);
-                return xmsgCampaignForm(xmsg, response.successResponse.user);
+                return Mono.just(xmsg);
             } else {
                 return botService.updateUser(deviceString, appName)
                         .flatMap(new Function<Pair<Boolean, String>, Mono<XMessage>>() {
                             @Override
                             public Mono<XMessage> apply(Pair<Boolean, String> result) {
+                            	log.info("FA update user");
                                 if (result.getLeft()) {
                                     from.setDeviceID(result.getRight());
+                                    from.setEncryptedDeviceID(deviceID);
                                     xmsg.setFrom(from);
                                     ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
-                                    if (response.wasSuccessful()) {
-                                    	return xmsgCampaignForm(xmsg, response.successResponse.user);
+                                    if (response.wasSuccessful() && isUserRegistered(response, appID)) {
+                                    	redisCacheService.setFAUserIDForAppCache(getFACacheName(deviceID, appID), response.successResponse.user.id.toString());
+                                        return Mono.just(xmsg);
                                     } else {
-                                    	return Mono.just(xmsg);
+                                        return Mono.just(xmsg);
                                     }
                                 } else {
-                                	xmsg.setFrom(null);
+                                    xmsg.setFrom(null);
                                     return Mono.just(xmsg);
                                 }
                             }
@@ -252,41 +346,84 @@ public class ReactiveConsumer {
         }
     }
     
+    /**
+     * Get Fusion Auth User's UUID for App
+     * @param deviceID
+     * @param appID
+     * @return
+     */
+    private String getFAUserIdForApp(String deviceID, UUID appID) {
+    	String userID = null;
+    
+    	Object result = redisCacheService.getFAUserIDForAppCache(getFACacheName(deviceID, appID));
+    	userID = result != null ? result.toString() : null;
+    	
+    	if(userID == null || userID.isEmpty()) {
+    		ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
+            
+            if (response.wasSuccessful() && isUserRegistered(response, appID)) {
+            	userID = response.successResponse.user.id.toString();
+            	redisCacheService.setFAUserIDForAppCache(getFACacheName(deviceID, appID), userID);
+            }
+    	}
+        return userID;
+    }
+    
+    /**
+     * Check if FA user is registered for appid
+     * @param response
+     * @param appID
+     * @return
+     */
+    private Boolean isUserRegistered(ClientResponse<UserResponse, Errors> response, UUID appID) {
+    	List<UserRegistration> registrations = response.successResponse.user.getRegistrations();
+    	for(int i=0; i<registrations.size(); i++) {
+    		if(registrations.get(i).applicationId.equals(appID)) {
+    			return true;
+    		}
+    	}
+    	return false;
+    }
+    
+    private String getFACacheName(String deviceID, UUID appID) {
+    	return deviceID+"-"+appID.toString();
+    }
+    
     private Mono<XMessage> xmsgCampaignForm(XMessage xmsg, User user) {
-    	return campaignService.getCampaignFromNameTransformer(xmsg.getCampaign())
-	    	.map(new Function<JsonNode, XMessage>() {
-				@Override
+        return campaignService.getCampaignFromNameTransformer(xmsg.getCampaign())
+            .map(new Function<JsonNode, XMessage>() {
+                @Override
                 public XMessage apply(JsonNode campaign) {
-	    			String campaignID = campaign.findValue("id").asText();
-	    			Map<String, String> formIDs = getCampaignFormIds(campaign);
-	    			String currentFormID = getCurrentFormId(xmsg, campaignID, formIDs, user);
-	    			
-	    			HashMap<String, String> metaData = new HashMap<String, String>();
-	    			metaData.put("campaignId", campaignID);
-					metaData.put("currentFormID", currentFormID);
-					
-					saveCurrentFormID(xmsg.getFrom().getUserID(), campaignID, 
-							currentFormID);
-	    			
-	    			Transformer transf = new Transformer();
-	    			transf.setId("test");
-	    			transf.setMetaData(metaData);
-	    			
-	    			ArrayList<Transformer> transformers = new ArrayList<Transformer>();
-	    			transformers.add(transf);
-	    			
-	    			xmsg.setTransformers(transformers);
-	    			
-	    			try {
-						System.out.println("XML:"+xmsg.toXML());
-					} catch (JAXBException e) {
-						// TODO Auto-generated catch block
-						e.printStackTrace();
-					}
-	    			
-	    			return xmsg;
-	    		}
-	    	});
+                    String campaignID = campaign.findValue("id").asText();
+                    Map<String, String> formIDs = getCampaignFormIds(campaign);
+                    String currentFormID = getCurrentFormId(xmsg, campaignID, formIDs, user);
+                    
+                    HashMap<String, String> metaData = new HashMap<String, String>();
+                    metaData.put("campaignId", campaignID);
+                    metaData.put("currentFormID", currentFormID);
+                    
+                    saveCurrentFormID(xmsg.getFrom().getUserID(), campaignID, 
+                            currentFormID);
+                    
+                    Transformer transf = new Transformer();
+                    transf.setId("test");
+                    transf.setMetaData(metaData);
+                    
+                    ArrayList<Transformer> transformers = new ArrayList<Transformer>();
+                    transformers.add(transf);
+                    
+                    xmsg.setTransformers(transformers);
+                    
+                    try {
+                        System.out.println("XML:"+xmsg.toXML());
+                    } catch (JAXBException e) {
+                        // TODO Auto-generated catch block
+                        e.printStackTrace();
+                    }
+                    
+                    return xmsg;
+                }
+            });
     }
     /**
      * Get all form ids from the campaign node
@@ -295,22 +432,22 @@ public class ReactiveConsumer {
      * @return
      */
     private Map<String, String> getCampaignFormIds(JsonNode campaign) {
-    	ArrayList<String> formIDs = new ArrayList<String>();
-    	Map<String, String> formIDs2 = new HashMap();
-    	try {
-    		campaign.findValue("logicIDs").forEach(t -> {
-    			formIDs2.put(t.asText(), "");
-    		});
-    		
-    		campaign.findValue("logic").forEach(t -> {
-    			formIDs2.put(t.findValue("id").asText(), t.findValue("formID").asText());
-    		});
-    		
-    		System.out.println("formIDs:"+formIDs2);
-    	} catch (Exception e) {
-    		e.printStackTrace();
-    	}
-    	return formIDs2;
+        ArrayList<String> formIDs = new ArrayList<String>();
+        Map<String, String> formIDs2 = new HashMap();
+        try {
+            campaign.findValue("logicIDs").forEach(t -> {
+                formIDs2.put(t.asText(), "");
+            });
+            
+            campaign.findValue("logic").forEach(t -> {
+                formIDs2.put(t.findValue("id").asText(), t.findValue("formID").asText());
+            });
+            
+            System.out.println("formIDs:"+formIDs2);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return formIDs2;
     }
     
     /**
@@ -322,49 +459,49 @@ public class ReactiveConsumer {
      * @return
      */
     private String getCurrentFormId(XMessage xmsg, String campaignID, Map<String, String> formIDs, User user) {
-    	String currentFormID = "";
-    	
-    	Boolean consent = checkUserCampaignConsent(campaignID, user);
-    	
-    	/* Fetch current form id from file for user & campaign */
-    	currentFormID = getCurrentFormIDFromFile(xmsg.getFrom().getUserID(), campaignID);
-    	
-    	/* if current form id is empty, then set the first form id as current form id 
-    	 * else if current form id is equal to consent form id
-    	 	* 	
-    	 */
-    	System.out.println("currentFormID:"+currentFormID);
-    	if(currentFormID == null || currentFormID.isEmpty()) {
-    		if(!formIDs.isEmpty() && formIDs.size() > 0) {
-				currentFormID = formIDs.values().toArray()[0].toString();
-			}
-    	} 
-    	
-    	/* if current form is consent form */
-    	if(currentFormID.equals(getConsentFormID())) {
-    		/* if consent already exists, set next form as current one,
-    		 * else check the response for further details */
-    		if(consent) {
-    			currentFormID = formIDs.values().toArray()[1].toString();
-    		} else {
-    			String response = xmsg.getPayload().getText();
-        		if(response.equals("1")) {
-        			//update fusion auth client for consent & set the next form id as current form id
-        			addUserCampaignConsent(campaignID, user);
-        			currentFormID = formIDs.values().toArray()[1].toString();
-        		} else if(response.equals("2")) {
-        			//drop conversation
-        			currentFormID = "";
-        			System.out.println("drop conversation.");
-        		} else {
-        			// invalid response, leave the consent form id as current
-        		}
-    		}	
-    	}
-    	
-    	System.out.println(currentFormID);
-    	
-    	return currentFormID;
+        String currentFormID = "";
+        
+        Boolean consent = checkUserCampaignConsent(campaignID, user);
+        
+        /* Fetch current form id from file for user & campaign */
+        currentFormID = getCurrentFormIDFromFile(xmsg.getFrom().getUserID(), campaignID);
+        
+        /* if current form id is empty, then set the first form id as current form id 
+         * else if current form id is equal to consent form id
+            *   
+         */
+        System.out.println("currentFormID:"+currentFormID);
+        if(currentFormID == null || currentFormID.isEmpty()) {
+            if(!formIDs.isEmpty() && formIDs.size() > 0) {
+                currentFormID = formIDs.values().toArray()[0].toString();
+            }
+        } 
+        
+        /* if current form is consent form */
+        if(currentFormID.equals(getConsentFormID())) {
+            /* if consent already exists, set next form as current one,
+             * else check the response for further details */
+            if(consent) {
+                currentFormID = formIDs.values().toArray()[1].toString();
+            } else {
+                String response = xmsg.getPayload().getText();
+                if(response.equals("1")) {
+                    //update fusion auth client for consent & set the next form id as current form id
+                    addUserCampaignConsent(campaignID, user);
+                    currentFormID = formIDs.values().toArray()[1].toString();
+                } else if(response.equals("2")) {
+                    //drop conversation
+                    currentFormID = "";
+                    System.out.println("drop conversation.");
+                } else {
+                    // invalid response, leave the consent form id as current
+                }
+            }   
+        }
+        
+        System.out.println(currentFormID);
+        
+        return currentFormID;
     }
     
     /**
@@ -375,23 +512,23 @@ public class ReactiveConsumer {
      * @return
      */
     private String getCurrentFormIDFromFile(String userID, String campaignID) {
-    	String currentFormID = "";
-    	Resource resource = new ClassPathResource(getJsonFilePath());
+        String currentFormID = "";
+        Resource resource = new ClassPathResource(getJsonFilePath());
         try {
-        	ObjectMapper mapper = new ObjectMapper();
-        	
+            ObjectMapper mapper = new ObjectMapper();
+            
             InputStream inputStream = resource.getInputStream();
-        	
+            
             byte[] bdata = FileCopyUtils.copyToByteArray(inputStream);
             
             JsonNode rootNode = mapper.readTree(bdata);
             
             if(!rootNode.isEmpty() && rootNode.get(userID) != null 
-            		&& rootNode.path(userID).get(campaignID) != null) {
-            	currentFormID = rootNode.path(userID).get(campaignID).asText();
+                    && rootNode.path(userID).get(campaignID) != null) {
+                currentFormID = rootNode.path(userID).get(campaignID).asText();
             }
         } catch (IOException e) {
-        	e.printStackTrace();
+            e.printStackTrace();
         }
         return currentFormID;
     }
@@ -403,28 +540,28 @@ public class ReactiveConsumer {
      * @param campaignID
      * @param currentFormID
      */
-	private void saveCurrentFormID(String userID, String campaignID, String currentFormID) {
-    	Resource resource = new ClassPathResource(getJsonFilePath());
+    private void saveCurrentFormID(String userID, String campaignID, String currentFormID) {
+        Resource resource = new ClassPathResource(getJsonFilePath());
         try {
-        	ObjectMapper mapper = new ObjectMapper();
-        	
-        	File file = resource.getFile();
+            ObjectMapper mapper = new ObjectMapper();
+            
+            File file = resource.getFile();
             InputStream inputStream = resource.getInputStream();
-        	
+            
             byte[] bdata = FileCopyUtils.copyToByteArray(inputStream);
             
             JsonNode rootNode = mapper.readTree(bdata);
             if(rootNode.isEmpty()) {
-            	rootNode = mapper.createObjectNode();
+                rootNode = mapper.createObjectNode();
             }
             
             if(!rootNode.isEmpty() && rootNode.get(userID) != null) {
-            	((ObjectNode) rootNode.path(userID)).put(campaignID, currentFormID);
-        	} else {
-            	JsonNode campaignNode = mapper.createObjectNode();
-            	((ObjectNode) campaignNode).put(campaignID, currentFormID);
-            	
-            	((ObjectNode) rootNode).put(userID, campaignNode);
+                ((ObjectNode) rootNode.path(userID)).put(campaignID, currentFormID);
+            } else {
+                JsonNode campaignNode = mapper.createObjectNode();
+                ((ObjectNode) campaignNode).put(campaignID, currentFormID);
+                
+                ((ObjectNode) rootNode).put(userID, campaignNode);
             }
             
             System.out.println("Saved File String:"+rootNode.toString());
@@ -434,100 +571,107 @@ public class ReactiveConsumer {
             fileWriter.flush();
             fileWriter.close();
         } catch (IOException e) {
-        	e.printStackTrace();
+            e.printStackTrace();
         }
     }
     
     private String getJsonFilePath() {
-    	return "userCurrentForm.json";
+        return "userCurrentForm.json";
     }
     
 //    private 
     
     private String getConsentFormID() {
-    	return "mandatory-consent-v1";
+        return "mandatory-consent-v1";
     }
 
-    private Mono<SenderReceiverInfo> resolveUser(SenderReceiverInfo from, String appName) {
+    /**
+     * NOT IN USE
+     * Save and get user data, authenticated by FA, 
+     * @param campaignID
+     * @param user
+     * @return
+     */
+//    private Mono<SenderReceiverInfo> resolveUser(SenderReceiverInfo from, String appName) {
+//        try {
+//            String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
+//            String encodedBase64Key = encodeKey(secret);
+//            String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
+//            ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
+//            if (response.wasSuccessful()) {
+//                from.setDeviceID(response.successResponse.user.id.toString());
+////                checkConsent(from.getCampaignID(), response.successResponse.user);
+//                return Mono.just(from);
+//            } else {
+//                return botService.updateUser(deviceString, appName)
+//                        .flatMap(new Function<Pair<Boolean, String>, Mono<SenderReceiverInfo>>() {
+//                            @Override
+//                            public Mono<SenderReceiverInfo> apply(Pair<Boolean, String> result) {
+//                                if (result.getLeft()) {
+//                                    from.setDeviceID(result.getRight());
+//                                    return Mono.just(from);
+//                                } else {
+//                                    return Mono.just(null);
+//                                }
+//                            }
+//                        }).doOnError(new Consumer<Throwable>() {
+//                            @Override
+//                            public void accept(Throwable throwable) {
+//                                log.error("Error in updateUser" + throwable.getMessage());
+//                            }
+//                        });
+//            }
+//        } catch (Exception e) {
+//            e.printStackTrace();
+//            log.error("Error in resolveUser" + e.getMessage());
+//            return Mono.just(null);
+//        }
+//    }
+    
+    private Boolean checkUserCampaignConsent(String campaignID, User user) {
+        Boolean consent = false;
         try {
-            String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
-            String encodedBase64Key = encodeKey(secret);
-            String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
-            ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.retrieveUserByUsername(deviceID);
-            if (response.wasSuccessful()) {
-                from.setDeviceID(response.successResponse.user.id.toString());
-//                checkConsent(from.getCampaignID(), response.successResponse.user);
-                return Mono.just(from);
-            } else {
-                return botService.updateUser(deviceString, appName)
-                        .flatMap(new Function<Pair<Boolean, String>, Mono<SenderReceiverInfo>>() {
-                            @Override
-                            public Mono<SenderReceiverInfo> apply(Pair<Boolean, String> result) {
-                                if (result.getLeft()) {
-                                    from.setDeviceID(result.getRight());
-                                    return Mono.just(from);
-                                } else {
-                                    return Mono.just(null);
-                                }
-                            }
-                        }).doOnError(new Consumer<Throwable>() {
-                            @Override
-                            public void accept(Throwable throwable) {
-                                log.error("Error in updateUser" + throwable.getMessage());
-                            }
-                        });
+            Object consentData = user.data.get("consent");
+            ArrayList consentArray = (ArrayList) consentData;
+            if(consentArray != null && consentArray.contains(campaignID)) {
+                consent = true;
             }
         } catch (Exception e) {
             e.printStackTrace();
-            log.error("Error in resolveUser" + e.getMessage());
-            return Mono.just(null);
         }
-    }
-    
-    private Boolean checkUserCampaignConsent(String campaignID, User user) {
-    	Boolean consent = false;
-    	try {
-	    	Object consentData = user.data.get("consent");
-	    	ArrayList consentArray = (ArrayList) consentData;
-	    	if(consentArray != null && consentArray.contains(campaignID)) {
-	    		consent = true;
-	    	}
-    	} catch (Exception e) {
-    		e.printStackTrace();
-    	}
-    	return consent;
+        return consent;
     }
     
     private void addUserCampaignConsent(String campaignID, User user) 
     {
-    	try {
-    		Object consentData = user.data.get("consent");
-			ArrayList consentArray = (ArrayList) consentData;
-    		
-    		if(consentArray == null || (
-    			consentArray != null && !consentArray.contains(campaignID))
-    		){
-    			consentArray.add(campaignID);
-    			
-    			user.data.put("consent", consentArray); 
-        		
-        		updateFAUser(user);
-    		}
-    	} catch (Exception e) {
-    		e.printStackTrace();
-    	}
+        try {
+            Object consentData = user.data.get("consent");
+            ArrayList consentArray = (ArrayList) consentData;
+            
+            if(consentArray == null || (
+                consentArray != null && !consentArray.contains(campaignID))
+            ){
+                consentArray.add(campaignID);
+                
+                user.data.put("consent", consentArray); 
+                
+                updateFAUser(user);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
     
     private void updateFAUser(User user) {
-    	System.out.println(user);
-    	UserRequest r = new UserRequest(user);
-		
-    	ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.updateUser(user.id, r);
-		if(response.wasSuccessful()) {
-			System.out.println("user update success");
-		} else {
-			System.out.println("error in user update"+response.errorResponse);
-		}
+        System.out.println(user);
+        UserRequest r = new UserRequest(user);
+        
+        ClientResponse<UserResponse, Errors> response = campaignService.fusionAuthClient.updateUser(user.id, r);
+        if(response.wasSuccessful()) {
+            System.out.println("user update success");
+        } else {
+            System.out.println("error in user update"+response.errorResponse);
+        }
     }
 
     private void logTimeTaken(long startTime, int checkpointID) {
@@ -675,5 +819,16 @@ public class ReactiveConsumer {
                 }
             }
         }
+    }
+    
+    /**
+     * Switch from & To in XMessage
+     * @param xMessage
+     */
+    private void switchFromTo(XMessage xMessage) {
+        SenderReceiverInfo from = xMessage.getFrom();
+        SenderReceiverInfo to = xMessage.getTo();
+        xMessage.setFrom(to);
+        xMessage.setTo(from);
     }
 }
