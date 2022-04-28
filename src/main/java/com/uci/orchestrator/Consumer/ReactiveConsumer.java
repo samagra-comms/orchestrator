@@ -120,7 +120,6 @@ public class ReactiveConsumer {
     
     @EventListener(ApplicationStartedEvent.class)
     public void onMessage() {
-        
         reactiveKafkaReceiver
                 .doOnNext(new Consumer<ReceiverRecord<String, String>>() {
                     @Override
@@ -236,8 +235,8 @@ public class ReactiveConsumer {
         	ArrayNode sampleData = mapper.createArrayNode();
         	for (int i = 0; i < users.length(); i++) {
             	ObjectNode userData = mapper.createObjectNode();
-            	userData.put("task", "coding");
-            	userData.put("name", ((JSONObject) users.get(i)).getString("whatsapp_mobile_number"));
+            	userData.put("country", "US");
+            	userData.put("name", ((JSONObject) users.get(i)).getString("phoneNo"));
             	userData.put("__index", i);
             	sampleData.add(userData);
         	}
@@ -253,8 +252,8 @@ public class ReactiveConsumer {
         	ArrayNode userMetaData = mapper.createArrayNode();
             usersMessage.forEach(userMsg -> {
         		int j = Integer.parseInt(userMsg.get("__index").toString());
-        		String userPhone = ((JSONObject) users.get(j)).getString("whatsapp_mobile_number");
-        		userPhone = "7597185708";
+        		String userPhone = ((JSONObject) users.get(j)).getString("phoneNo");
+//        		userPhone = "7597185708";
                
         		ObjectNode map = mapper.createObjectNode();
         		map.put("phone", userPhone);
