@@ -146,13 +146,13 @@ public class ReactiveConsumer {
                                     		String appId = campaign.get("id").asText();
                                             JsonNode firstTransformer = campaign.findValues("transformers").get(0).get(0);
                                             log.info("firstTransformer: "+firstTransformer);
-                                    		resolveUserNew(msg, appId)
+                                    		resolveUserNew(msg, appId) // look here
 	                                        	.doOnNext(new Consumer<XMessage>() {
 		                                            @Override
 		                                            public void accept(XMessage msg) {
 		                                                SenderReceiverInfo from = msg.getFrom();
 		                                                // msg.setFrom(from);
-		                                                getLastMessageID(msg)
+		                                                getLastMessageID(msg) // look here too
 		                                                        .doOnNext(lastMessageID -> {
 		                                                            logTimeTaken(startTime, 4);
 		                                                            msg.setLastMessageID(lastMessageID);
@@ -165,7 +165,7 @@ public class ReactiveConsumer {
 		                                                                try {
 		                                                                	if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
 		                                                                		&& firstTransformer.get("type").asText().equals("broadcast")) {
-		                                                                		XMessage message = setXMessageMeta(msg, campaign, firstTransformer);
+		                                                                		XMessage message = setXMessageMeta(msg, campaign, firstTransformer); // critical one
 		                                                                		kafkaProducer.send(broadcastTransformerTopic, message.toXML());
 		                                                                	} else {
 		                                                                		kafkaProducer.send(odkTransformerTopic, msg.toXML());
@@ -299,7 +299,7 @@ public class ReactiveConsumer {
             String encodedBase64Key = encodeKey(secret);
             String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
             log.info("deviceString: "+deviceString+", encyprted deviceString: "+deviceID);
-            String userID = getFAUserIdForApp(deviceID, appID);
+            String userID = getFAUserIdForApp(deviceID, appID); // try mocking this
             
             if (userID != null && !userID.isEmpty()) {
             	log.info("Found FA user id");

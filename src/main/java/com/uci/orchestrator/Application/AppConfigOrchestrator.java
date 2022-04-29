@@ -70,12 +70,12 @@ public class AppConfigOrchestrator {
         return new CampaignService(webClient, fusionAuthClient, cache);
     }
 
-    @Bean
-    public KieSession DroolSession() {
-        Resource resource = ResourceFactory.newClassPathResource("OrchestratorRules.xlsx", getClass());
-        KieSession kSession = new DroolsBeanFactory().getKieSession(resource);
-        return kSession;
-    }
+//    @Bean
+//    public KieSession DroolSession() {
+//        Resource resource = ResourceFactory.newClassPathResource("OrchestratorRules.xlsx", getClass());
+//        KieSession kSession = new DroolsBeanFactory().getKieSession(resource);
+//        return kSession;
+//    }
 
     @Bean
     Map<String, Object> kafkaConsumerConfiguration() {
