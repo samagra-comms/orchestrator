@@ -157,6 +157,10 @@ public class ReactiveConsumer {
 		                                                            logTimeTaken(startTime, 4);
 		                                                            msg.setLastMessageID(lastMessageID);
 		                                                            msg.setAdapterId(adapterID);
+		                                                            
+		                                                            /* Switch From & To */
+		                                                            switchFromTo(msg);
+		                                                            
 		                                                            if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
 		                                                                try {
 		                                                                	if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
@@ -221,62 +225,64 @@ public class ReactiveConsumer {
     	/* Get federated users from federation services */
         JSONArray users = userService.getUsersFromFederatedServers(campaignID);
         
-    	/* Create request body data for user template message */
-        ObjectMapper mapper = new ObjectMapper();
-        ObjectNode node = mapper.createObjectNode();
-    	node.put("body", transformer.get("meta").get("body").asText());
-    	node.put("type", transformer.get("meta").get("type").asText());
-    	node.put("user", transformer.get("meta").get("user").asText());
-    	
-    	ArrayNode sampleData = mapper.createArrayNode();
-    	for (int i = 0; i < users.length(); i++) {
-        	ObjectNode userData = mapper.createObjectNode();
-        	userData.put("country", "india");
-        	userData.put("name", ((JSONObject) users.get(i)).getString("whatsapp_mobile_number"));
-        	userData.put("__index", i);
-        	sampleData.add(userData);
-    	}
-    	node.put("sampleData", sampleData);
-    	
-    	/* Fetch user messages by template from template service */
-    	ArrayList<JSONObject> usersMessage = userService.getUsersMessageByTemplate(node);
-        
-    	log.info("usersMessage: "+usersMessage);
-    	
-    	/* Set User messages against the user phone */
-    	ObjectNode federatedUsersMeta = mapper.createObjectNode();
-    	ArrayNode userMetaData = mapper.createArrayNode();
-        usersMessage.forEach(userMsg -> {
-    		int j = Integer.parseInt(userMsg.get("__index").toString());
-    		String userPhone = ((JSONObject) users.get(j)).getString("whatsapp_mobile_number");
-    		userPhone = "7597185708";
-           
-    		ObjectNode map = mapper.createObjectNode();
-    		map.put("phone", userPhone);
-    		map.put("message", userMsg.get("body").toString());
-            userMetaData.add(map);
-    		
-    		log.info("index: "+j+", body: "+userMsg.get("body").toString()+", phone:"+userPhone);
-    	});
-        
-        federatedUsersMeta.put("list", userMetaData);
-    	
-    	/* Set Transformer & its meta data in XMessage */
-    	HashMap<String, String> metaData = new HashMap<String, String>();
-    	metaData.put("id", transformer.get("id").asText());
-    	metaData.put("type", transformer.get("type") != null && !transformer.get("type").asText().isEmpty() 
-    							? transformer.get("type").asText()
-    							: "");
-    	metaData.put("federatedUsers", federatedUsersMeta.toString());
-    	
-    	Transformer transf = new Transformer();
-        transf.setId(transformer.get("id").asText());
-    	transf.setMetaData(metaData);
-    	
-    	ArrayList<Transformer> transformers = new ArrayList<Transformer>();
-        transformers.add(transf);
-        
-        xMessage.setTransformers(transformers);
+        if(users != null) {
+        	/* Create request body data for user template message */
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectNode node = mapper.createObjectNode();
+        	node.put("body", transformer.get("meta").get("body").asText());
+        	node.put("type", transformer.get("meta").get("type").asText());
+        	node.put("user", transformer.get("meta").get("user").asText());
+        	
+        	ArrayNode sampleData = mapper.createArrayNode();
+        	for (int i = 0; i < users.length(); i++) {
+            	ObjectNode userData = mapper.createObjectNode();
+            	userData.put("country", "US");
+            	userData.put("name", ((JSONObject) users.get(i)).getString("phoneNo"));
+            	userData.put("__index", i);
+            	sampleData.add(userData);
+        	}
+        	node.put("sampleData", sampleData);
+        	
+        	/* Fetch user messages by template from template service */
+        	ArrayList<JSONObject> usersMessage = userService.getUsersMessageByTemplate(node);
+            
+        	log.info("usersMessage: "+usersMessage);
+        	
+        	/* Set User messages against the user phone */
+        	ObjectNode federatedUsersMeta = mapper.createObjectNode();
+        	ArrayNode userMetaData = mapper.createArrayNode();
+            usersMessage.forEach(userMsg -> {
+        		int j = Integer.parseInt(userMsg.get("__index").toString());
+        		String userPhone = ((JSONObject) users.get(j)).getString("phoneNo");
+//        		userPhone = "7597185708";
+               
+        		ObjectNode map = mapper.createObjectNode();
+        		map.put("phone", userPhone);
+        		map.put("message", userMsg.get("body").toString());
+                userMetaData.add(map);
+        		
+        		log.info("index: "+j+", body: "+userMsg.get("body").toString()+", phone:"+userPhone);
+        	});
+            
+            federatedUsersMeta.put("list", userMetaData);
+        	
+        	/* Set Transformer & its meta data in XMessage */
+        	HashMap<String, String> metaData = new HashMap<String, String>();
+        	metaData.put("id", transformer.get("id").asText());
+        	metaData.put("type", transformer.get("type") != null && !transformer.get("type").asText().isEmpty() 
+        							? transformer.get("type").asText()
+        							: "");
+        	metaData.put("federatedUsers", federatedUsersMeta.toString());
+        	
+        	Transformer transf = new Transformer();
+            transf.setId(transformer.get("id").asText());
+        	transf.setMetaData(metaData);
+        	
+        	ArrayList<Transformer> transformers = new ArrayList<Transformer>();
+            transformers.add(transf);
+            
+            xMessage.setTransformers(transformers);
+        }
         
         return xMessage;
     }
@@ -813,5 +819,16 @@ public class ReactiveConsumer {
                 }
             }
         }
+    }
+    
+    /**
+     * Switch from & To in XMessage
+     * @param xMessage
+     */
+    private void switchFromTo(XMessage xMessage) {
+        SenderReceiverInfo from = xMessage.getFrom();
+        SenderReceiverInfo to = xMessage.getTo();
+        xMessage.setFrom(to);
+        xMessage.setTo(from);
     }
 }
