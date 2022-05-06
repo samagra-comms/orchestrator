@@ -21,6 +21,7 @@ import io.fusionauth.domain.api.UserRequest;
 import io.fusionauth.domain.api.UserResponse;
 import io.fusionauth.domain.User;
 import io.fusionauth.domain.UserRegistration;
+import io.r2dbc.postgresql.codec.Json;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import messagerosa.core.model.DeviceType;
@@ -41,7 +42,9 @@ import org.springframework.boot.context.event.ApplicationStartedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
+import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.lang.Nullable;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 import org.springframework.util.FileCopyUtils;
 
@@ -111,115 +114,154 @@ public class ReactiveConsumer {
 
     @Autowired
     private RedisCacheService redisCacheService;
-    
+
     public AESWrapper encryptor;
 
     private final String DEFAULT_APP_NAME = "Global Bot";
     LocalDateTime yesterday = LocalDateTime.now().minusDays(1L);
 
     
-    @EventListener(ApplicationStartedEvent.class)
-    public void onMessage() {
-        
-        reactiveKafkaReceiver
-                .doOnNext(new Consumer<ReceiverRecord<String, String>>() {
-                    @Override
-                    public void accept(ReceiverRecord<String, String> stringMessage) {
-                        try {
-                            final long startTime = System.nanoTime();
-                            logTimeTaken(startTime, 0);
-                            XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.value().getBytes()));
-                            SenderReceiverInfo from = msg.getFrom();
-                            logTimeTaken(startTime, 1);
-                            fetchAdapterID(msg.getApp())
-                            .doOnNext(new Consumer<String>() {
+    @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
+    public void onMessage(@Payload String stringMessage) {
+        try {
+            final long startTime = System.nanoTime();
+            logTimeTaken(startTime, 0);
+            XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.getBytes()));
+            SenderReceiverInfo from = msg.getFrom();
+            logTimeTaken(startTime, 1);
+            fetchAdapterID(msg.getApp())
+                    .doOnNext(new Consumer<String>() {
+                        @Override
+                        public void accept(String adapterID) {
+                            logTimeTaken(startTime, 3);
+                            from.setCampaignID(msg.getApp());
+                            if(from.getDeviceType() == null) {
+                                from.setDeviceType(DeviceType.PHONE);
+                            }
+                            campaignService.getCampaignFromNameTransformer(msg.getApp()).doOnNext(new Consumer<JsonNode>() {
                                 @Override
-                                public void accept(String adapterID) {
-                                    logTimeTaken(startTime, 3);
-                                    from.setCampaignID(msg.getApp());
-                                     if(from.getDeviceType() == null) {
-                                        from.setDeviceType(DeviceType.PHONE);
-                                    }
-                                    campaignService.getCampaignFromNameTransformer(msg.getApp()).doOnNext(new Consumer<JsonNode>() {
-                                    	@Override
-                                        public void accept(JsonNode campaign) {
-                                    		String appId = campaign.get("id").asText();
-                                            JsonNode firstTransformer = campaign.findValues("transformers").get(0).get(0);
-                                            log.info("firstTransformer: "+firstTransformer);
-                                    		resolveUserNew(msg, appId)
-	                                        	.doOnNext(new Consumer<XMessage>() {
-		                                            @Override
-		                                            public void accept(XMessage msg) {
-		                                                SenderReceiverInfo from = msg.getFrom();
-		                                                // msg.setFrom(from);
-		                                                getLastMessageID(msg)
-		                                                        .doOnNext(lastMessageID -> {
-		                                                            logTimeTaken(startTime, 4);
-		                                                            msg.setLastMessageID(lastMessageID);
-		                                                            msg.setAdapterId(adapterID);
-		                                                            
-		                                                            /* Switch From & To */
-		                                                            switchFromTo(msg);
-		                                                            
-		                                                            if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
-		                                                                try {
-		                                                                	if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
-		                                                                		&& firstTransformer.get("type").asText().equals("broadcast")) {
-		                                                                		XMessage message = setXMessageMeta(msg, campaign, firstTransformer);
-		                                                                		kafkaProducer.send(broadcastTransformerTopic, message.toXML());
-		                                                                	} else {
-		                                                                		kafkaProducer.send(odkTransformerTopic, msg.toXML());
-		                                                                	}
-		                                                                    // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
-		                                                                } catch (JAXBException e) {
-		                                                                    e.printStackTrace();
-		                                                                }
-		                                                                logTimeTaken(startTime, 15);
-		                                                            }
-		                                                        })
-		                                                        .doOnError(new Consumer<Throwable>() {
-		                                                            @Override
-		                                                            public void accept(Throwable throwable) {
-		                                                                log.error("Error in getLastMessageID" + throwable.getMessage());
-		                                                            }
-		                                                        })
-		                                                        .subscribe();
-		                                            }
-                                        })
-                                        .doOnError(new Consumer<Throwable>() {
-                                            @Override
-                                            public void accept(Throwable throwable) {
-                                                log.error("Error in resolveUser" + throwable.getMessage());
-                                            }
-                                        }).subscribe();
-                                    	}
-                                        
-                                    }).subscribe();
+                                public void accept(JsonNode campaign) {
+                                    /* Set XMessage Transformers */
+                                    XMessage message = setXMessageTransformers(msg, campaign);
+
+                                    String appId = campaign.get("id").asText();
+                                    JsonNode firstTransformer = campaign.findValues("transformers").get(0).get(0);
+
+                                    resolveUserNew(message, appId)
+                                            .doOnNext(new Consumer<XMessage>() {
+                                                @Override
+                                                public void accept(XMessage msg) {
+                                                    SenderReceiverInfo from = msg.getFrom();
+                                                    // msg.setFrom(from);
+                                                    getLastMessageID(msg)
+                                                            .doOnNext(lastMessageID -> {
+                                                                logTimeTaken(startTime, 4);
+                                                                msg.setLastMessageID(lastMessageID);
+                                                                msg.setAdapterId(adapterID);
+
+                                                                /* Switch From & To */
+                                                                switchFromTo(msg);
+
+                                                                if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
+                                                                    try {
+                                                                        log.info("final msg.toXML(): "+msg.toXML().toString());
+                                                                        if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
+                                                                                && firstTransformer.get("type").asText().equals("broadcast")) {
+                                                                            kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                                        } else {
+                                                                            kafkaProducer.send(odkTransformerTopic, msg.toXML());
+                                                                        }
+                                                                        // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
+                                                                    } catch (JAXBException e) {
+                                                                        e.printStackTrace();
+                                                                    }
+                                                                    logTimeTaken(startTime, 15);
+                                                                }
+                                                            })
+                                                            .doOnError(new Consumer<Throwable>() {
+                                                                @Override
+                                                                public void accept(Throwable throwable) {
+                                                                    log.error("Error in getLastMessageID" + throwable.getMessage());
+                                                                }
+                                                            })
+                                                            .subscribe();
+                                                }
+                                            })
+                                            .doOnError(new Consumer<Throwable>() {
+                                                @Override
+                                                public void accept(Throwable throwable) {
+                                                    log.error("Error in resolveUser" + throwable.getMessage());
+                                                }
+                                            }).subscribe();
                                 }
-                            })
-                            .doOnError(new Consumer<Throwable>() {
-                                @Override
-                                public void accept(Throwable throwable) {
-                                    log.error("Error in fetchAdapterID" + throwable.getMessage());
-                                }
-                            })
-                            .subscribe();
-                        } catch (Exception e) {
-                            e.printStackTrace();
+
+                            }).subscribe();
                         }
-                    }
-                })
-                .doOnError(new Consumer<Throwable>() {
-                    @Override
-                    public void accept(Throwable e) {
-                        System.out.println(e.getMessage());
-                        log.error("KafkaFlux exception", e);
-                    }
-                })
-                .subscribe();
+                    })
+                    .doOnError(new Consumer<Throwable>() {
+                        @Override
+                        public void accept(Throwable throwable) {
+                            log.error("Error in fetchAdapterID" + throwable.getMessage());
+                        }
+                    })
+                    .subscribe();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
-    
-    private XMessage setXMessageMeta(XMessage xMessage, JsonNode campaign, JsonNode transformer) {
+
+    /**
+     * Set Transformer in XMessage with transformer required data in meta
+     * @param xMessage
+     * @param campaign
+     * @return XMessage
+     */
+    private XMessage setXMessageTransformers(XMessage xMessage, JsonNode campaign) {
+        ArrayList<Transformer> transformers = new ArrayList<Transformer>();
+
+        ArrayList transformerList = (ArrayList) campaign.findValues("transformers");
+        transformerList.forEach(transformerTmp -> {
+            JsonNode transformerNode = (JsonNode) transformerTmp;
+            int i=0;
+            while(transformerNode.get(i) != null) {
+                JsonNode transformer = transformerNode.get(i);
+                log.info("transformer:"+transformer);
+
+                HashMap<String, String> metaData = new HashMap<String, String>();
+                metaData.put("id", transformer.get("id").asText());
+                metaData.put("type", transformer.get("type") != null && !transformer.get("type").asText().isEmpty()
+                        ? transformer.get("type").asText()
+                        : "");
+                metaData.put("formID", transformer.findValue("formID") != null && !transformer.findValue("formID").asText().isEmpty()
+                        ? transformer.findValue("formID").asText()
+                        : "");
+                metaData.put("startingMessage", campaign.findValue("startingMessage").asText());
+                metaData.put("botId", campaign.findValue("id").asText());
+                metaData.put("botOwnerOrgID", campaign.findValue("ownerOrgID").asText());
+                if(transformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
+                        && transformer.get("type").asText().equals("broadcast")) {
+                    metaData.put("federatedUsers", getFederatedUsersMeta(campaign, transformer));
+                }
+
+                Transformer transf = new Transformer();
+                transf.setId(transformer.get("id").asText());
+                transf.setMetaData(metaData);
+
+                transformers.add(transf);
+                i++;
+            }
+        });
+        xMessage.setTransformers(transformers);
+        return xMessage;
+    }
+
+    /**
+     * Get Federated Users Data for Broadcast transformer
+     * @param campaign
+     * @param transformer
+     * @return Federated users as json string
+     */
+    private String getFederatedUsersMeta(JsonNode campaign, JsonNode transformer) {
     	String campaignID = campaign.get("id").asText();
     	
     	/* Get federated users from federation services */
@@ -265,26 +307,10 @@ public class ReactiveConsumer {
         	});
             
             federatedUsersMeta.put("list", userMetaData);
-        	
-        	/* Set Transformer & its meta data in XMessage */
-        	HashMap<String, String> metaData = new HashMap<String, String>();
-        	metaData.put("id", transformer.get("id").asText());
-        	metaData.put("type", transformer.get("type") != null && !transformer.get("type").asText().isEmpty() 
-        							? transformer.get("type").asText()
-        							: "");
-        	metaData.put("federatedUsers", federatedUsersMeta.toString());
-        	
-        	Transformer transf = new Transformer();
-            transf.setId(transformer.get("id").asText());
-        	transf.setMetaData(metaData);
-        	
-        	ArrayList<Transformer> transformers = new ArrayList<Transformer>();
-            transformers.add(transf);
-            
-            xMessage.setTransformers(transformers);
+
+            return federatedUsersMeta.toString();
         }
-        
-        return xMessage;
+        return "";
     }
     
     private Mono<XMessage> resolveUserNew(XMessage xmsg, String appId) {
