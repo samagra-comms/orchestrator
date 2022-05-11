@@ -166,7 +166,7 @@ public class ReactiveConsumer {
                                                                     try {
                                                                         log.info("final msg.toXML(): "+msg.toXML().toString());
                                                                         if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
-                                                                                && firstTransformer.get("type").asText().equals("broadcast")) {
+                                                                                && firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals("broadcast")) {
                                                                             kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
                                                                         } else {
                                                                             kafkaProducer.send(odkTransformerTopic, msg.toXML());
@@ -239,8 +239,12 @@ public class ReactiveConsumer {
                 metaData.put("botId", campaign.findValue("id").asText());
                 metaData.put("botOwnerOrgID", campaign.findValue("ownerOrgID").asText());
                 if(transformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
-                        && transformer.get("type").asText().equals("broadcast")) {
+                        && transformer.get("type") != null && transformer.get("type").asText().equals("broadcast")) {
                     metaData.put("federatedUsers", getFederatedUsersMeta(campaign, transformer));
+                }
+
+                if(transformer.findValue("hiddenFields") != null && !transformer.findValue("hiddenFields").isEmpty()) {
+                    metaData.put("hiddenFields", campaign.findValue("hiddenFields").toString());
                 }
 
                 Transformer transf = new Transformer();
