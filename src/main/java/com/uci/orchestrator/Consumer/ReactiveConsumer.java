@@ -236,6 +236,7 @@ public class ReactiveConsumer {
         	for (int i = 0; i < users.length(); i++) {
             	ObjectNode userData = mapper.createObjectNode();
             	userData.put("country", "US");
+                userData.put("url", "http://google.com");
             	userData.put("name", ((JSONObject) users.get(i)).getString("phoneNo"));
             	userData.put("__index", i);
             	sampleData.add(userData);
@@ -272,7 +273,10 @@ public class ReactiveConsumer {
         							? transformer.get("type").asText()
         							: "");
         	metaData.put("federatedUsers", federatedUsersMeta.toString());
-        	
+            if(transformer.get("meta").get("templateId") != null && !transformer.get("meta").get("templateId").asText().isEmpty()){
+                metaData.put("templateId", transformer.get("meta").get("templateId").asText());
+            }
+
         	Transformer transf = new Transformer();
             transf.setId(transformer.get("id").asText());
         	transf.setMetaData(metaData);
