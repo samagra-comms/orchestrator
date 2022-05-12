@@ -235,9 +235,14 @@ public class ReactiveConsumer {
         	ArrayNode sampleData = mapper.createArrayNode();
         	for (int i = 0; i < users.length(); i++) {
             	ObjectNode userData = mapper.createObjectNode();
-            	userData.put("country", "US");
-                userData.put("url", "http://google.com");
-            	userData.put("name", ((JSONObject) users.get(i)).getString("phoneNo"));
+                if(transformer.get("meta") != null && transformer.get("meta").get("params").toString() != null && !transformer.get("meta").get("params").toString().isEmpty()){
+                    JSONArray paramArr = new JSONArray(transformer.get("meta").get("params").toString());
+                    for(int k=0; k<paramArr.length(); k++){
+                        if(!((JSONObject) users.get(i)).isNull(paramArr.getString(k))){
+                            userData.put(paramArr.getString(k), ((JSONObject) users.get(i)).getString(paramArr.getString(k)));
+                        }
+                    }
+                }
             	userData.put("__index", i);
             	sampleData.add(userData);
         	}
