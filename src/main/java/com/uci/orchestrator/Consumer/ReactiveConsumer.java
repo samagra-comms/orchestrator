@@ -13,7 +13,9 @@ import com.uci.utils.CampaignService;
 import com.uci.utils.cache.service.RedisCacheService;
 import com.uci.utils.encryption.AESWrapper;
 import com.uci.utils.kafka.ReactiveProducer;
+import com.uci.utils.kafka.RecordProducer;
 import com.uci.utils.kafka.SimpleProducer;
+import com.uci.utils.kafka.adapter.TextMapGetterAdapter;
 import com.uci.utils.service.UserService;
 
 import io.fusionauth.domain.api.UserConsentResponse;
@@ -21,6 +23,8 @@ import io.fusionauth.domain.api.UserRequest;
 import io.fusionauth.domain.api.UserResponse;
 import io.fusionauth.domain.User;
 import io.fusionauth.domain.UserRegistration;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.context.Context;
 import io.r2dbc.postgresql.codec.Json;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +35,8 @@ import messagerosa.core.model.XMessage;
 import messagerosa.core.model.XMessagePayload;
 import messagerosa.xml.XMessageParser;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.header.Header;
 import org.apache.kafka.common.protocol.types.Field;
 import org.apache.tomcat.util.json.JSONParser;
 import org.json.JSONArray;
@@ -44,6 +50,8 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.lang.Nullable;
+import org.springframework.messaging.MessageHeaders;
+import org.springframework.messaging.handler.annotation.Headers;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 import org.springframework.util.FileCopyUtils;
@@ -80,7 +88,7 @@ import static com.uci.utils.encryption.AESWrapper.encodeKey;
 @Slf4j
 public class ReactiveConsumer {
 
-    private final Flux<ReceiverRecord<String, String>> reactiveKafkaReceiver;
+    private final Flux<ConsumerRecord<String, String>> reactiveKafkaReceiver;
 
 //    @Autowired
 //    public KieSession kSession;
@@ -89,7 +97,7 @@ public class ReactiveConsumer {
     public XMessageRepository xMessageRepository;
 
     @Autowired
-    public SimpleProducer kafkaProducer;
+    public RecordProducer kafkaProducer;
 
     @Autowired
     public ReactiveProducer reactiveProducer;
@@ -121,12 +129,14 @@ public class ReactiveConsumer {
     LocalDateTime yesterday = LocalDateTime.now().minusDays(1L);
 
     
-    @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
-    public void onMessage(@Payload String stringMessage) {
+    @KafkaListener(id = "${inboundProcessed}",  topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=org.apache.kafka.clients.consumer.ConsumerRecord"})
+    public void onMessage(ConsumerRecord<String, String> stringMessage) {
         try {
+            Context extractedContext = GlobalOpenTelemetry.getPropagators().getTextMapPropagator().extract(Context.current(), stringMessage.headers(), TextMapGetterAdapter.getter);
+            log.info("Opentelemetry extracted context : "+extractedContext);
             final long startTime = System.nanoTime();
             logTimeTaken(startTime, 0);
-            XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.getBytes()));
+            XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.value().getBytes()));
             SenderReceiverInfo from = msg.getFrom();
             logTimeTaken(startTime, 1);
             fetchAdapterID(msg.getApp())
@@ -167,9 +177,9 @@ public class ReactiveConsumer {
                                                                         log.info("final msg.toXML(): "+msg.toXML().toString());
                                                                         if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
                                                                                 && firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals("broadcast")) {
-                                                                            kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                                            kafkaProducer.send(broadcastTransformerTopic, msg.toXML(), Context.current());
                                                                         } else {
-                                                                            kafkaProducer.send(odkTransformerTopic, msg.toXML());
+                                                                            kafkaProducer.send(odkTransformerTopic, msg.toXML(), Context.current());
                                                                         }
                                                                         // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
                                                                     } catch (JAXBException e) {
