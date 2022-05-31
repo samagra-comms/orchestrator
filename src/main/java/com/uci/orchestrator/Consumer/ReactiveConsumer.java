@@ -165,8 +165,7 @@ public class ReactiveConsumer {
                                                                 if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
                                                                     try {
                                                                         log.info("final msg.toXML(): "+msg.toXML().toString());
-                                                                        if(firstTransformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
-                                                                                && firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals("broadcast")) {
+                                                                        if(firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals("broadcast")) {
                                                                             kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
                                                                         } else {
                                                                             kafkaProducer.send(odkTransformerTopic, msg.toXML());
@@ -238,8 +237,7 @@ public class ReactiveConsumer {
                 metaData.put("startingMessage", campaign.findValue("startingMessage").asText());
                 metaData.put("botId", campaign.findValue("id").asText());
                 metaData.put("botOwnerOrgID", campaign.findValue("ownerOrgID").asText());
-                if(transformer.get("id").asText().equals("774cd134-6657-4688-85f6-6338e2323dde")
-                        && transformer.get("type") != null && transformer.get("type").asText().equals("broadcast")) {
+                if(transformer.get("type") != null && transformer.get("type").asText().equals("broadcast")) {
                     metaData.put("federatedUsers", getFederatedUsersMeta(campaign, transformer));
                 }
 
@@ -286,7 +284,8 @@ public class ReactiveConsumer {
         	ArrayNode sampleData = mapper.createArrayNode();
         	for (int i = 0; i < users.length(); i++) {
             	ObjectNode userData = mapper.createObjectNode();
-                if(transformer.get("meta") != null && transformer.get("meta").get("params") != null && !transformer.get("meta").get("params").toString().isEmpty()){
+                if(transformer.get("meta") != null && transformer.get("meta").get("params") != null
+                        && !transformer.get("meta").get("params").toString().isEmpty()){
                     JSONArray paramArr = new JSONArray(transformer.get("meta").get("params").toString());
                     for(int k=0; k<paramArr.length(); k++){
                         if(!((JSONObject) users.get(i)).isNull(paramArr.getString(k))){
