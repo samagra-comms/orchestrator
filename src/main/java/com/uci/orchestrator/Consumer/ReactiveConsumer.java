@@ -273,13 +273,14 @@ public class ReactiveConsumer {
     	/* Get federated users from federation services */
         JSONArray users = userService.getUsersFromFederatedServers(campaignID);
         
-        if(users != null) {
-        	/* Create request body data for user template message */
+        if(users != null && transformer.get("meta") != null) {
+            /* Create request body data for user template message */
             ObjectMapper mapper = new ObjectMapper();
             ObjectNode node = mapper.createObjectNode();
         	node.put("body", transformer.get("meta").get("body").asText());
         	node.put("type", transformer.get("meta").get("type").asText());
-        	node.put("user", transformer.get("meta").get("user").asText());
+        	node.put("user", transformer.get("meta").get("user") != null ?
+                    transformer.get("meta").get("user").asText() : "");
         	
         	ArrayNode sampleData = mapper.createArrayNode();
         	for (int i = 0; i < users.length(); i++) {
@@ -308,14 +309,21 @@ public class ReactiveConsumer {
         	ArrayNode userMetaData = mapper.createArrayNode();
             usersMessage.forEach(userMsg -> {
         		int j = Integer.parseInt(userMsg.get("__index").toString());
-        		String userPhone = ((JSONObject) users.get(j)).getString("phoneNo");
-//        		userPhone = "7597185708";
+                JSONObject userObj = ((JSONObject) users.get(j));
+        		String userPhone = userObj.getString("phoneNo");
                
         		ObjectNode map = mapper.createObjectNode();
         		map.put("phone", userPhone);
         		map.put("message", userMsg.get("body").toString());
+                try{
+                    if(userObj.get("fcmToken") != null) {
+                        map.put("fcmToken", userObj.getString("fcmToken"));
+                    }
+                } catch (Exception e) {
+                    //
+                }
+
                 userMetaData.add(map);
-        		
         		log.info("index: "+j+", body: "+userMsg.get("body").toString()+", phone:"+userPhone);
         	});
             
