@@ -272,15 +272,18 @@ public class ReactiveConsumer {
     	
     	/* Get federated users from federation services */
         JSONArray users = userService.getUsersFromFederatedServers(campaignID);
-        
-        if(users != null && transformer.get("meta") != null) {
+
+        /* Check if users, & related meta data exists in transformer */
+        if(users != null && transformer.get("meta") != null
+                && transformer.get("meta").get("type") != null
+                && transformer.get("meta").get("body") != null) {
+            ObjectNode meta = (ObjectNode) transformer.get("meta");
+
             /* Create request body data for user template message */
             ObjectMapper mapper = new ObjectMapper();
             ObjectNode node = mapper.createObjectNode();
-        	node.put("body", transformer.get("meta").get("body").asText());
-        	node.put("type", transformer.get("meta").get("type").asText());
-        	node.put("user", transformer.get("meta").get("user") != null ?
-                    transformer.get("meta").get("user").asText() : "");
+            node.put("body", meta.get("body").asText());
+            node.put("type", meta.get("type").asText());
         	
         	ArrayNode sampleData = mapper.createArrayNode();
         	for (int i = 0; i < users.length(); i++) {
@@ -311,7 +314,7 @@ public class ReactiveConsumer {
         		int j = Integer.parseInt(userMsg.get("__index").toString());
                 JSONObject userObj = ((JSONObject) users.get(j));
         		String userPhone = userObj.getString("phoneNo");
-               
+
         		ObjectNode map = mapper.createObjectNode();
         		map.put("phone", userPhone);
         		map.put("message", userMsg.get("body").toString());
