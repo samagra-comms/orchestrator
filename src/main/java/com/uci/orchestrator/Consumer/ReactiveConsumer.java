@@ -236,6 +236,7 @@ public class ReactiveConsumer {
                         : "");
                 metaData.put("startingMessage", campaign.findValue("startingMessage").asText());
                 metaData.put("botId", campaign.findValue("id").asText());
+                metaData.put("botOwnerID", campaign.findValue("ownerID").asText());
                 metaData.put("botOwnerOrgID", campaign.findValue("ownerOrgID").asText());
                 if(transformer.get("type") != null && transformer.get("type").asText().equals("broadcast")) {
                     metaData.put("federatedUsers", getFederatedUsersMeta(campaign, transformer));
