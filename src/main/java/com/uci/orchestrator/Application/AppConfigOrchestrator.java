@@ -2,7 +2,7 @@ package com.uci.orchestrator.Application;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.uci.orchestrator.Drools.DroolsBeanFactory;
-import com.uci.utils.CampaignService;
+import com.uci.utils.BotService;
 import com.uci.utils.kafka.ReactiveProducer;
 import io.fusionauth.client.FusionAuthClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -64,16 +64,6 @@ public class AppConfigOrchestrator {
     @Bean
     public FusionAuthClient getFAClient() {
         return new FusionAuthClient(FUSIONAUTH_KEY, FUSIONAUTH_URL);
-    }
-
-    @Bean
-    public CampaignService getCampaignService() {
-        WebClient webClient = WebClient.builder()
-                .baseUrl(CAMPAIGN_URL)
-                .defaultHeader("admin-token", CAMPAIGN_ADMIN_TOKEN)
-                .build();
-        FusionAuthClient fusionAuthClient = getFAClient();
-        return new CampaignService(webClient, fusionAuthClient, cache);
     }
 
     @Bean
@@ -147,9 +137,4 @@ public class AppConfigOrchestrator {
     	KafkaTemplate<String, String> kafkaTemplate = new KafkaTemplate<>(producerFactory());
     	return (KafkaTemplate<String, String>) kafkaTemplate;
     }
-    
-//    @Bean
-//    public HealthService healthService() {
-//        return new HealthService();
-//    }
 }
