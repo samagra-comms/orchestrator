@@ -103,61 +103,69 @@ public class ReactiveConsumer {
             logTimeTaken(startTime, 1);
             botService.getBotNodeFromName(msg.getApp()).doOnNext(new Consumer<JsonNode>() {
                 @Override
-                public void accept(JsonNode campaign) {
-                    from.setCampaignID(msg.getApp());
-                    if(from.getDeviceType() == null) {
-                        from.setDeviceType(DeviceType.PHONE);
-                    }
-                    /* Set XMessage Transformers */
-                    XMessage message = setXMessageTransformers(msg, campaign);
+                public void accept(JsonNode botNode) {
+                    if(botNode != null && !botNode.isEmpty()) {
+                        from.setCampaignID(msg.getApp());
+                        if(from.getDeviceType() == null) {
+                            from.setDeviceType(DeviceType.PHONE);
+                        }
+                        if(msg.getAdapterId() == null || msg.getAdapterId().isEmpty()) {
+                            msg.setAdapterId(BotUtil.getBotNodeAdapterId(botNode));
+                        }
+                        /* Set XMessage Transformers */
+                        XMessage message = setXMessageTransformers(msg, botNode);
 
-                    String appId = campaign.get("id").asText();
-                    JsonNode firstTransformer = campaign.findValues("transformers").get(0).get(0);
+                        String appId = botNode.get("id").asText();
+                        JsonNode firstTransformer = botNode.findValues("transformers").get(0);
 
-                    resolveUser(message, appId)
-                            .doOnNext(new Consumer<XMessage>() {
-                                @Override
-                                public void accept(XMessage msg) {
-                                    SenderReceiverInfo from = msg.getFrom();
-                                    // msg.setFrom(from);
-                                    getLastMessageID(msg)
-                                            .doOnNext(lastMessageID -> {
-                                                logTimeTaken(startTime, 4);
-                                                msg.setLastMessageID(lastMessageID);
+                        resolveUser(message, appId)
+                                .doOnNext(new Consumer<XMessage>() {
+                                    @Override
+                                    public void accept(XMessage msg) {
+                                        SenderReceiverInfo from = msg.getFrom();
+                                        // msg.setFrom(from);
+                                        getLastMessageID(msg)
+                                                .doOnNext(lastMessageID -> {
+                                                    logTimeTaken(startTime, 4);
+                                                    msg.setLastMessageID(lastMessageID);
 
-                                                /* Switch From & To */
-                                                switchFromTo(msg);
+                                                    /* Switch From & To */
+                                                    switchFromTo(msg);
 
-                                                if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
-                                                    try {
-                                                        log.info("final msg.toXML(): "+msg.toXML().toString());
-                                                        if(firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals("broadcast")) {
-                                                            kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
-                                                        } else {
-                                                            kafkaProducer.send(odkTransformerTopic, msg.toXML());
+                                                    if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
+                                                        try {
+                                                            log.info("final msg.toXML(): "+msg.toXML().toString());
+                                                            if(firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals(BotUtil.botTypeBroadcast)) {
+                                                                kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                            } else {
+                                                                kafkaProducer.send(odkTransformerTopic, msg.toXML());
+                                                            }
+                                                            // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
+                                                        } catch (JAXBException e) {
+                                                            e.printStackTrace();
                                                         }
-                                                        // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
-                                                    } catch (JAXBException e) {
-                                                        e.printStackTrace();
+                                                        logTimeTaken(startTime, 15);
                                                     }
-                                                    logTimeTaken(startTime, 15);
-                                                }
-                                            })
-                                            .doOnError(new Consumer<Throwable>() {
-                                                @Override
-                                                public void accept(Throwable throwable) {
-                                                    log.error("Error in getLastMessageID" + throwable.getMessage());
-                                                }
-                                            })
-                                            .subscribe();
-                                }
-                            })
-                            .doOnError(new Consumer<Throwable>() {
-                                @Override
-                                public void accept(Throwable throwable) {
-                                    log.error("Error in resolveUser" + throwable.getMessage());
-                                }
-                            }).subscribe();
+                                                })
+                                                .doOnError(new Consumer<Throwable>() {
+                                                    @Override
+                                                    public void accept(Throwable throwable) {
+                                                        log.error("Error in getLastMessageID" + throwable.getMessage());
+                                                    }
+                                                })
+                                                .subscribe();
+                                    }
+                                })
+                                .doOnError(new Consumer<Throwable>() {
+                                    @Override
+                                    public void accept(Throwable throwable) {
+                                        log.error("Error in resolveUser" + throwable.getMessage());
+                                    }
+                                }).subscribe();
+                    } else {
+                        log.error("Bot node not found by name: "+msg.getApp());
+                    }
+
                 }
 
             }).subscribe();
@@ -202,12 +210,12 @@ public class ReactiveConsumer {
                         && !transformerMeta.findValue("formID").asText().isEmpty()
                         ? transformerMeta.findValue("formID").asText()
                         : "");
-                if(transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals("broadcast")) {
+                if(transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals(BotUtil.botTypeBroadcast)) {
                     metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer));
                 }
 
                 if(transformerMeta.findValue("hiddenFields") != null && !transformerMeta.findValue("hiddenFields").isEmpty()) {
-                    metaData.put("hiddenFields", botNode.path("meta").findValue("hiddenFields").toString());
+                    metaData.put("hiddenFields", transformerMeta.findValue("hiddenFields").toString());
                 }
 
                 if(transformerMeta.get("templateId") != null && !transformerMeta.get("templateId").asText().isEmpty()){
