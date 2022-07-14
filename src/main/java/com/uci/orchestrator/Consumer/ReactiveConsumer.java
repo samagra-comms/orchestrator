@@ -100,6 +100,9 @@ public class ReactiveConsumer {
     @Value("${broadcast-transformer}")
     public String broadcastTransformerTopic;
 
+    @Value("${generic-transformer}")
+    public String genericTransformerTopic;
+
     @Autowired
     public BotService botService;
 
@@ -167,6 +170,8 @@ public class ReactiveConsumer {
                                                                         log.info("final msg.toXML(): "+msg.toXML().toString());
                                                                         if(firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals("broadcast")) {
                                                                             kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                                        } else if(firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals("generic")) {
+                                                                            kafkaProducer.send(genericTransformerTopic, msg.toXML());
                                                                         } else {
                                                                             kafkaProducer.send(odkTransformerTopic, msg.toXML());
                                                                         }
@@ -240,6 +245,10 @@ public class ReactiveConsumer {
                 metaData.put("botOwnerOrgID", campaign.findValue("ownerOrgID").asText());
                 if(transformer.get("type") != null && transformer.get("type").asText().equals("broadcast")) {
                     metaData.put("federatedUsers", getFederatedUsersMeta(campaign, transformer));
+                }
+
+                if(transformer.get("type") != null && transformer.get("type").asText().equals("generic")) {
+                    metaData.put("url", transformer.findValue("url").asText());
                 }
 
                 if(transformer.findValue("hiddenFields") != null && !transformer.findValue("hiddenFields").isEmpty()) {
