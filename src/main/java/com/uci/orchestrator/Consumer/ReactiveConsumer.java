@@ -138,9 +138,9 @@ public class ReactiveConsumer {
                                                     if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
                                                         try {
                                                             log.info("final msg.toXML(): "+msg.toXML().toString());
-                                                            if(firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals(BotUtil.botTypeBroadcast)) {
+                                                            if(firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
                                                                 kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
-                                                            }  else if(firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals("generic")) {
+                                                            }  else if(firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals("generic")) {
                                                                 kafkaProducer.send(genericTransformerTopic, msg.toXML());
                                                             } else {
                                                                 kafkaProducer.send(odkTransformerTopic, msg.toXML());
@@ -215,7 +215,7 @@ public class ReactiveConsumer {
                         && !transformerMeta.findValue("formID").asText().isEmpty()
                         ? transformerMeta.findValue("formID").asText()
                         : "");
-                if(transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals(BotUtil.botTypeBroadcast)) {
+                if(transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
                     metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer));
                 }
 
@@ -227,7 +227,7 @@ public class ReactiveConsumer {
                     metaData.put("templateId", transformerMeta.get("templateId").asText());
                 }
 
-		if(transformer.get("type") != null && transformer.get("type").asText().equals("generic")) {
+		        if(transformer.get("type") != null && transformer.get("type").asText().equals(BotUtil.transformerTypeGeneric)) {
                     metaData.put("url", transformer.findValue("url").asText());
                 }
 
