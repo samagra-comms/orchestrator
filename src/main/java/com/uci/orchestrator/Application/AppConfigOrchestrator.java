@@ -6,7 +6,9 @@ import com.uci.utils.CampaignService;
 import com.uci.utils.kafka.ReactiveProducer;
 import io.fusionauth.client.FusionAuthClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.serialization.StringDeserializer;
 import org.kie.api.io.Resource;
 import org.kie.api.runtime.KieSession;
 import org.kie.internal.io.ResourceFactory;
@@ -112,8 +114,8 @@ public class AppConfigOrchestrator {
         String[] inTopicName = new String[]{inboundProcessedTopic, processOutboundTopic};
 
         return options.subscription(Arrays.asList(inTopicName))
-                .withKeyDeserializer(new JsonDeserializer<>())
-                .withValueDeserializer(new JsonDeserializer(String.class));
+                .withKeyDeserializer(new StringDeserializer())
+                .withValueDeserializer(new StringDeserializer());
     }
 
     @Bean
@@ -122,8 +124,8 @@ public class AppConfigOrchestrator {
     }
 
     @Bean
-    Flux<ReceiverRecord<String, String>> reactiveKafkaReceiver(ReceiverOptions<String, String> kafkaReceiverOptions) {
-        return KafkaReceiver.create(kafkaReceiverOptions).receive();
+    Flux<ConsumerRecord<String, String>> reactiveKafkaReceiver(ReceiverOptions<String, String> kafkaReceiverOptions) {
+        return KafkaReceiver.create(kafkaReceiverOptions).receiveAtmostOnce();
     }
 
     @Bean

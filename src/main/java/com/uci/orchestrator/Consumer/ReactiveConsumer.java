@@ -13,6 +13,7 @@ import com.uci.utils.CampaignService;
 import com.uci.utils.cache.service.RedisCacheService;
 import com.uci.utils.encryption.AESWrapper;
 import com.uci.utils.kafka.ReactiveProducer;
+import com.uci.utils.kafka.RecordProducer;
 import com.uci.utils.kafka.SimpleProducer;
 import com.uci.utils.service.UserService;
 
@@ -21,6 +22,7 @@ import io.fusionauth.domain.api.UserRequest;
 import io.fusionauth.domain.api.UserResponse;
 import io.fusionauth.domain.User;
 import io.fusionauth.domain.UserRegistration;
+import io.opentelemetry.context.Context;
 import io.r2dbc.postgresql.codec.Json;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,6 +33,7 @@ import messagerosa.core.model.XMessage;
 import messagerosa.core.model.XMessagePayload;
 import messagerosa.xml.XMessageParser;
 import org.apache.commons.lang3.tuple.Pair;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.common.protocol.types.Field;
 import org.apache.tomcat.util.json.JSONParser;
 import org.json.JSONArray;
@@ -80,7 +83,7 @@ import static com.uci.utils.encryption.AESWrapper.encodeKey;
 @Slf4j
 public class ReactiveConsumer {
 
-    private final Flux<ReceiverRecord<String, String>> reactiveKafkaReceiver;
+    private final Flux<ConsumerRecord<String, String>> reactiveKafkaReceiver;
 
 //    @Autowired
 //    public KieSession kSession;
@@ -89,7 +92,7 @@ public class ReactiveConsumer {
     public XMessageRepository xMessageRepository;
 
     @Autowired
-    public SimpleProducer kafkaProducer;
+    public RecordProducer kafkaProducer;
 
     @Autowired
     public ReactiveProducer reactiveProducer;
@@ -169,11 +172,11 @@ public class ReactiveConsumer {
                                                                     try {
                                                                         log.info("final msg.toXML(): "+msg.toXML().toString());
                                                                         if(firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals("broadcast")) {
-                                                                            kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                                            kafkaProducer.send(broadcastTransformerTopic, msg.toXML(), Context.current());
                                                                         } else if(firstTransformer.get("type") != null && firstTransformer.get("type").asText().equals("generic")) {
-                                                                            kafkaProducer.send(genericTransformerTopic, msg.toXML());
+                                                                            kafkaProducer.send(genericTransformerTopic, msg.toXML(), Context.current());
                                                                         } else {
-                                                                            kafkaProducer.send(odkTransformerTopic, msg.toXML());
+                                                                            kafkaProducer.send(odkTransformerTopic, msg.toXML(), Context.current());
                                                                         }
                                                                         // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
                                                                     } catch (JAXBException e) {
