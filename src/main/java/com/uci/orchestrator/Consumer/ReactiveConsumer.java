@@ -300,8 +300,13 @@ public class ReactiveConsumer {
         		map.put("phone", userPhone);
         		map.put("message", userMsg.get("body").toString());
                 try{
+                    /* FCM Token */
                     if(userObj.get("fcmToken") != null) {
                         map.put("fcmToken", userObj.getString("fcmToken"));
+                    }
+                    /* FCM - If clickActionUrl found in userObj, use it, override previous one */
+                    if(userObj.get("fcmClickActionUrl") != null) {
+                        map.put("fcmClickActionUrl", userObj.getString("fcmClickActionUrl"));
                     }
                 } catch (Exception e) {
                     //
