@@ -5,6 +5,7 @@ import com.uci.orchestrator.Drools.DroolsBeanFactory;
 import com.uci.utils.CampaignService;
 import com.uci.utils.kafka.ReactiveProducer;
 import io.fusionauth.client.FusionAuthClient;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.kie.api.io.Resource;
@@ -146,6 +147,11 @@ public class AppConfigOrchestrator {
     KafkaTemplate<String, String> kafkaTemplate() {
     	KafkaTemplate<String, String> kafkaTemplate = new KafkaTemplate<>(producerFactory());
     	return (KafkaTemplate<String, String>) kafkaTemplate;
+    }
+
+    @Bean
+    public NewTopic topic1() {
+        return new NewTopic(processOutboundTopic, 1, (short) 1);
     }
     
 //    @Bean
