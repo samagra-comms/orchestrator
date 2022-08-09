@@ -59,6 +59,12 @@ public class AppConfigOrchestrator {
     @Value("${inboundProcessed}")
     private String inboundProcessedTopic;
 
+    @Value("${broadcast-transformer}")
+    private String broadcastTransformerTopic;
+
+    @Value("${generic-transformer}")
+    private String genericTransformerTopic;
+
     @Autowired
     public Cache<Object, Object> cache;
 
@@ -149,11 +155,33 @@ public class AppConfigOrchestrator {
     	return (KafkaTemplate<String, String>) kafkaTemplate;
     }
 
+    /**
+     * Create process outbound topic, if does not exists
+     * @return
+     */
     @Bean
-    public NewTopic topic1() {
+    public NewTopic createProcessOutboundTopic() {
         return new NewTopic(processOutboundTopic, 1, (short) 1);
     }
-    
+
+    /**
+     * Create broadcast transformer topic, if does not exists
+     * @return
+     */
+    @Bean
+    public NewTopic createBroadcastTransformerTopic() {
+        return new NewTopic(broadcastTransformerTopic, 1, (short) 1);
+    }
+
+    /**
+     * Create generic transformer topic, if does not exists
+     * @return
+     */
+    @Bean
+    public NewTopic createGenericTransformerTopic() {
+        return new NewTopic(genericTransformerTopic, 1, (short) 1);
+    }
+
 //    @Bean
 //    public HealthService healthService() {
 //        return new HealthService();
