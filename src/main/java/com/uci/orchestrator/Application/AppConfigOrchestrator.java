@@ -5,6 +5,7 @@ import com.uci.orchestrator.Drools.DroolsBeanFactory;
 import com.uci.utils.BotService;
 import com.uci.utils.kafka.ReactiveProducer;
 import io.fusionauth.client.FusionAuthClient;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.kie.api.io.Resource;
@@ -57,6 +58,12 @@ public class AppConfigOrchestrator {
 
     @Value("${inboundProcessed}")
     private String inboundProcessedTopic;
+
+    @Value("${broadcast-transformer}")
+    private String broadcastTransformerTopic;
+
+    @Value("${generic-transformer}")
+    private String genericTransformerTopic;
 
     @Autowired
     public Cache<Object, Object> cache;
@@ -136,5 +143,32 @@ public class AppConfigOrchestrator {
     KafkaTemplate<String, String> kafkaTemplate() {
     	KafkaTemplate<String, String> kafkaTemplate = new KafkaTemplate<>(producerFactory());
     	return (KafkaTemplate<String, String>) kafkaTemplate;
+    }
+
+    /**
+     * Create process outbound topic, if does not exists
+     * @return
+     */
+    @Bean
+    public NewTopic createProcessOutboundTopic() {
+        return new NewTopic(processOutboundTopic, 1, (short) 1);
+    }
+
+    /**
+     * Create broadcast transformer topic, if does not exists
+     * @return
+     */
+    @Bean
+    public NewTopic createBroadcastTransformerTopic() {
+        return new NewTopic(broadcastTransformerTopic, 1, (short) 1);
+    }
+
+    /**
+     * Create generic transformer topic, if does not exists
+     * @return
+     */
+    @Bean
+    public NewTopic createGenericTransformerTopic() {
+        return new NewTopic(genericTransformerTopic, 1, (short) 1);
     }
 }
