@@ -79,12 +79,6 @@ import static com.uci.utils.encryption.AESWrapper.encodeKey;
 @RequiredArgsConstructor
 @Slf4j
 public class ReactiveConsumer {
-
-    private final Flux<ReceiverRecord<String, String>> reactiveKafkaReceiver;
-
-//    @Autowired
-//    public KieSession kSession;
-
     @Autowired
     public XMessageRepository xMessageRepository;
 
