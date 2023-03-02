@@ -255,6 +255,14 @@ public class ReactiveConsumer {
                     metaData.put("hiddenFields", campaign.findValue("hiddenFields").toString());
                 }
 
+                if(transformer.findValue("serviceClass") != null && !transformer.findValue("serviceClass").asText().isEmpty()) {
+                    String serviceClass = campaign.findValue("serviceClass").toString();
+                    if (serviceClass != null && !serviceClass.isEmpty() && serviceClass.contains("\"")) {
+                        serviceClass = serviceClass.replaceAll("\"", "");
+                    }
+                    metaData.put("serviceClass", serviceClass);
+                }
+
                 if(transformer.get("meta").get("templateId") != null && !transformer.get("meta").get("templateId").asText().isEmpty()){
                     metaData.put("templateId", transformer.get("meta").get("templateId").asText());
                 }
