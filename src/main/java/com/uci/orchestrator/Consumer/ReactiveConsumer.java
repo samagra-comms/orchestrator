@@ -267,6 +267,11 @@ public class ReactiveConsumer {
                     metaData.put("templateId", transformer.get("meta").get("templateId").asText());
                 }
 
+                if(transformer.get("meta").get("title") != null && !transformer.get("meta").get("title").asText().isEmpty()){
+                    metaData.put("title", transformer.get("meta").get("title").asText());
+                }
+
+
                 Transformer transf = new Transformer();
                 transf.setId(transformer.get("id").asText());
                 transf.setMetaData(metaData);
@@ -302,6 +307,7 @@ public class ReactiveConsumer {
             ObjectNode node = mapper.createObjectNode();
             node.put("body", meta.get("body").asText());
             node.put("type", meta.get("type").asText());
+            node.put("title", meta.get("title").asText());
         	
         	ArrayNode sampleData = mapper.createArrayNode();
         	for (int i = 0; i < users.length(); i++) {
