@@ -1,13 +1,6 @@
 package com.uci.orchestrator.User;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.uci.utils.CampaignService;
-import io.fusionauth.domain.Application;
-import org.junit.Assert;
 import org.junit.jupiter.api.Test;
-
-import java.util.ArrayList;
-import java.util.function.Function;
 
 public class CampaignServiceTest {
 

@@ -1,16 +1,13 @@
 package com.uci.orchestrator.Consumer;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.uci.utils.CampaignService;
+import com.uci.utils.BotService;
 import com.uci.utils.kafka.SimpleProducer;
 import lombok.extern.slf4j.Slf4j;
 import messagerosa.core.model.*;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Mono;
 
@@ -31,7 +28,7 @@ public class CampaignConsumer {
     public SimpleProducer kafkaProducer;
 
     @Autowired
-    private CampaignService campaignService;
+    private BotService botService;
 
     // @KafkaListener(id = "${campaign}", topics = "${campaign}")
     public void consumeMessage(String campaignID) throws Exception {
@@ -60,13 +57,12 @@ public class CampaignConsumer {
      */
     public Mono<XMessage> processMessage(String campaignID) throws Exception {
         // Get campaign ID and get campaign details {data: transformers [broadcast(SMS), <formID>(Whatsapp)]}
-        return campaignService
-                .getCampaignFromID(campaignID)
+        return botService
+                .getBotNodeFromId(campaignID)
                 .doOnError(s -> log.info(s.getMessage()))
                 .map(new Function<JsonNode, XMessage>() {
                     @Override
-                    public XMessage apply(JsonNode jsonNode) {
-                        JsonNode campaignDetails = jsonNode.get("data");
+                    public XMessage apply(JsonNode campaignDetails) {
                         ObjectMapper mapper = new ObjectMapper();
                         JsonNode adapter = campaignDetails.findValues("logic").get(0).get(0).get("adapter");
 
