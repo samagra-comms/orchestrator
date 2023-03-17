@@ -224,7 +224,7 @@ public class ReactiveConsumer {
                 }
 
 		if(transformer.findValue("serviceClass") != null && !transformer.findValue("serviceClass").asText().isEmpty()) {
-                    String serviceClass = campaign.findValue("serviceClass").toString();
+                    String serviceClass = transformer.findValue("serviceClass").toString();
                     if (serviceClass != null && !serviceClass.isEmpty() && serviceClass.contains("\"")) {
                         serviceClass = serviceClass.replaceAll("\"", "");
                     }
