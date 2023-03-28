@@ -191,12 +191,12 @@ public class ReactiveConsumer {
         ArrayList transformerList = (ArrayList) botNode.findValues("transformers");
         transformerList.forEach(transformerTmp -> {
             JsonNode transformerNode = (JsonNode) transformerTmp;
-            int i=0;
-            while(transformerNode.get(i) != null && transformerNode.get(i).path("meta") != null) {
+            int i = 0;
+            while (transformerNode.get(i) != null && transformerNode.get(i).path("meta") != null) {
                 JsonNode transformer = transformerNode.get(i);
                 JsonNode transformerMeta = transformer.path("meta") != null
                         ? transformer.path("meta") : null;
-                log.info("transformer:"+transformer);
+                log.info("transformer:" + transformer);
 
                 HashMap<String, String> metaData = new HashMap<String, String>();
                 /* Bot Data */
@@ -215,15 +215,15 @@ public class ReactiveConsumer {
                         && !transformerMeta.findValue("formID").asText().isEmpty()
                         ? transformerMeta.findValue("formID").asText()
                         : "");
-                if(transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
+                if (transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
                     metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer));
                 }
 
-                if(transformerMeta.findValue("hiddenFields") != null && !transformerMeta.findValue("hiddenFields").isEmpty()) {
+                if (transformerMeta.findValue("hiddenFields") != null && !transformerMeta.findValue("hiddenFields").isEmpty()) {
                     metaData.put("hiddenFields", transformerMeta.findValue("hiddenFields").toString());
                 }
 
-		if(transformer.findValue("serviceClass") != null && !transformer.findValue("serviceClass").asText().isEmpty()) {
+                if (transformer.findValue("serviceClass") != null && !transformer.findValue("serviceClass").asText().isEmpty()) {
                     String serviceClass = transformer.findValue("serviceClass").toString();
                     if (serviceClass != null && !serviceClass.isEmpty() && serviceClass.contains("\"")) {
                         serviceClass = serviceClass.replaceAll("\"", "");
@@ -231,15 +231,15 @@ public class ReactiveConsumer {
                     metaData.put("serviceClass", serviceClass);
                 }
 
-                if(transformerMeta.get("templateId") != null && !transformerMeta.get("templateId").asText().isEmpty()){
+                if (transformerMeta.get("templateId") != null && !transformerMeta.get("templateId").asText().isEmpty()) {
                     metaData.put("templateId", transformerMeta.get("templateId").asText());
                 }
 
-		if(transformerMeta.get("title") != null && !transformerMeta.get("title").asText().isEmpty()){
+                if (transformerMeta.get("title") != null && !transformerMeta.get("title").asText().isEmpty()) {
                     metaData.put("title", transformerMeta.get("title").asText());
                 }
 
-		        if(transformer.get("type") != null && transformer.get("type").asText().equals(BotUtil.transformerTypeGeneric)) {
+                if (transformer.get("type") != null && transformer.get("type").asText().equals(BotUtil.transformerTypeGeneric)) {
                     metaData.put("url", transformer.findValue("url").asText());
                 }
 
@@ -319,6 +319,9 @@ public class ReactiveConsumer {
                     /* FCM - If clickActionUrl found in userObj, use it, override previous one */
                     if(userObj.get("fcmClickActionUrl") != null) {
                         map.put("fcmClickActionUrl", userObj.getString("fcmClickActionUrl"));
+                    }
+                    if(transformerMeta.get("data") != null){
+                        map.put("data", transformerMeta.get("data"));
                     }
                 } catch (Exception e) {
                     //
@@ -474,7 +477,7 @@ public class ReactiveConsumer {
      * @return
      */
     private Mono<String> getLastMessageID(XMessage msg) {
-        if (msg.getMessageType().toString().equalsIgnoreCase("text")) {
+        if (msg != null && msg.getMessageType().toString().equalsIgnoreCase("text")) {
             return getLatestXMessage(msg.getFrom().getUserID(), yesterday, "SENT").map(new Function<XMessageDAO, String>() {
                 @Override
                 public String apply(XMessageDAO msg1) {
@@ -486,7 +489,7 @@ public class ReactiveConsumer {
                 }
             });
 
-        } else if (msg.getMessageType().toString().equalsIgnoreCase("button")) {
+        } else if (msg != null && msg.getMessageType().toString().equalsIgnoreCase("button")) {
             return getLatestXMessage(msg.getFrom().getUserID(), yesterday, "SENT").map(new Function<XMessageDAO, String>() {
                 @Override
                 public String apply(XMessageDAO lastMessage) {
