@@ -142,7 +142,7 @@ public class ReactiveConsumer {
                                                                     chunkSize = null;
                                                                 }
                                                                 if(chunkSize != null) {
-                                                                    if (msg.getTransformers() != null && msg.getTransformers().get(0) != null && msg.getTransformers().size() > 0
+                                                                    if (msg.getTransformers() != null && msg.getTransformers().size() > 0 && msg.getTransformers().get(0) != null
                                                                             && msg.getTransformers().get(0).getMetaData() != null && msg.getTransformers().get(0).getMetaData().get("federatedUsers") != null) {
                                                                         JSONArray federatedUsers = new JSONObject(msg.getTransformers().get(0).getMetaData().get("federatedUsers")).getJSONArray("list");
                                                                         int totalFederatedUsers = federatedUsers.length();
@@ -150,7 +150,7 @@ public class ReactiveConsumer {
                                                                             kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
                                                                         } else {
                                                                             List<JSONArray> jsonArrayList = chunkArrayList(federatedUsers, chunkSize);
-                                                                            int count = 0;
+                                                                            int count = 1;
                                                                             for (JSONArray jsonArray : jsonArrayList) {
                                                                                 log.info("Total Federated Users : " + federatedUsers.length() + " Chunk size : " + jsonArray.length() + " Sent to kafka : "+count);
                                                                                 msg.getTransformers().get(0).getMetaData().put("federatedUsers", new JSONObject().put("list", jsonArray).toString());
@@ -289,7 +289,7 @@ public class ReactiveConsumer {
      */
     private String getFederatedUsersMeta(JsonNode botNode, JsonNode transformer) {
     	String botId = botNode.get("id").asText();
-    	
+
     	/* Get federated users from federation services */
         JSONArray users = userService.getUsersFromFederatedServers(botId);
 
@@ -304,7 +304,7 @@ public class ReactiveConsumer {
             ObjectNode node = mapper.createObjectNode();
             node.put("body", transformerMeta.get("body").asText());
             node.put("type", transformerMeta.get("templateType").asText());
-        	
+
         	ArrayNode sampleData = mapper.createArrayNode();
         	for (int i = 0; i < users.length(); i++) {
             	ObjectNode userData = mapper.createObjectNode();
@@ -320,12 +320,12 @@ public class ReactiveConsumer {
             	sampleData.add(userData);
         	}
         	node.put("sampleData", sampleData);
-        	
+
         	/* Fetch user messages by template from template service */
         	ArrayList<JSONObject> usersMessage = userService.getUsersMessageByTemplate(node);
-            
+
         	log.info("usersMessage: "+usersMessage);
-        	
+
         	/* Set User messages against the user phone */
         	ObjectNode federatedUsersMeta = mapper.createObjectNode();
         	ArrayNode userMetaData = mapper.createArrayNode();
@@ -435,10 +435,10 @@ public class ReactiveConsumer {
      */
     private String getFAUserIdForApp(String deviceID, UUID appID) {
     	String userID = null;
-    
+
     	Object result = redisCacheService.getFAUserIDForAppCache(getFACacheName(deviceID, appID));
     	userID = result != null ? result.toString() : null;
-    	
+
     	if(userID == null || userID.isEmpty()) {
     		ClientResponse<UserResponse, Errors> response = botService.fusionAuthClient.retrieveUserByUsername(deviceID);
             
@@ -587,36 +587,18 @@ public class ReactiveConsumer {
      */
     private List<JSONArray> chunkArrayList(JSONArray users, int chunkSize) {
         if (users != null && users.length() > 0) {
-            ArrayList<JSONObject> arrayToChunk = new ArrayList<>();
-
-            for (int i = 0; i < users.length(); i++) {
-                arrayToChunk.add(users.getJSONObject(i));
+            ArrayList<JSONArray> chunksList = new ArrayList<>();
+            chunksList.add(new JSONArray());
+            for (int x = 0; x < users.length(); x++) {
+                JSONObject user = users.getJSONObject(x);
+                if (chunksList.get(chunksList.size() - 1).length() == chunkSize)
+                    chunksList.add(new JSONArray());
+                chunksList.get(chunksList.size() - 1).put(user);
             }
-            ArrayList<List<JSONObject>> chunkList = new ArrayList<>();
-            int guide = arrayToChunk.size();
-            int index = 0;
-            int tale = chunkSize;
-            while (tale < arrayToChunk.size()) {
-                chunkList.add(arrayToChunk.subList(index, tale));
-                guide = guide - chunkSize;
-                index = index + chunkSize;
-                tale = tale + chunkSize;
-            }
-            if (guide > 0) {
-                chunkList.add(arrayToChunk.subList(index, index + guide));
-            }
-            List<JSONArray> userChunksList = new ArrayList<>();
-            for (List<JSONObject> l : chunkList) {
-                JSONArray jsonArray = new JSONArray();
-                for (JSONObject jsonObject : l) {
-                    jsonArray.put(jsonObject);
-                }
-                userChunksList.add(jsonArray);
-            }
-            return userChunksList;
+            return chunksList;
         } else{
             log.error("Federated Users null found : "+users);
+            return null;
         }
-        return null;
     }
 }
