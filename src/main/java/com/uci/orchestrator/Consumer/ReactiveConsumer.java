@@ -44,10 +44,10 @@ import javax.xml.bind.JAXBException;
 import java.io.ByteArrayInputStream;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
+import java.util.Comparator;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -95,7 +95,9 @@ public class ReactiveConsumer {
     private final String DEFAULT_APP_NAME = "Global Bot";
     LocalDateTime yesterday = LocalDateTime.now().minusDays(1L);
 
-    
+    @Value("${broadcastNotificationChunkSize}")
+    private String broadcastNotificationChunkSize;
+
     @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
     public void onMessage(@Payload String stringMessage) {
         try {
@@ -137,10 +139,41 @@ public class ReactiveConsumer {
 
                                                     if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
                                                         try {
-                                                            log.info("final msg.toXML(): "+msg.toXML().toString());
-                                                            if(firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
-                                                                kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
-                                                            }  else if(firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals("generic")) {
+                                                            log.info("final msg.toXML(): " + msg.toXML().toString());
+
+                                                            if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
+                                                                Integer chunkSize = null;
+                                                                try {
+                                                                    chunkSize = Integer.parseInt(broadcastNotificationChunkSize);
+                                                                } catch(NumberFormatException ex){
+                                                                    chunkSize = null;
+                                                                }
+                                                                if(chunkSize != null) {
+                                                                    if (msg.getTransformers() != null && msg.getTransformers().size() > 0 && msg.getTransformers().get(0) != null
+                                                                            && msg.getTransformers().get(0).getMetaData() != null && msg.getTransformers().get(0).getMetaData().get("federatedUsers") != null) {
+                                                                        JSONArray federatedUsers = new JSONObject(msg.getTransformers().get(0).getMetaData().get("federatedUsers")).getJSONArray("list");
+                                                                        int totalFederatedUsers = federatedUsers.length();
+                                                                        if (totalFederatedUsers <= chunkSize) {
+                                                                            kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                                        } else {
+                                                                            List<JSONArray> jsonArrayList = chunkArrayList(federatedUsers, chunkSize);
+                                                                            int count = 1;
+                                                                            for (JSONArray jsonArray : jsonArrayList) {
+                                                                                log.info("Total Federated Users : " + federatedUsers.length() + " Chunk size : " + jsonArray.length() + " Sent to kafka : "+count);
+                                                                                msg.getTransformers().get(0).getMetaData().put("federatedUsers", new JSONObject().put("list", jsonArray).toString());
+                                                                                kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                                                count++;
+                                                                            }
+                                                                        }
+                                                                    } else {
+                                                                        log.error("federatedUsers not found : " + msg.toString());
+                                                                        kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                                    }
+                                                                } else{
+                                                                    kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                                }
+
+                                                            } else if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals("generic")) {
                                                                 kafkaProducer.send(genericTransformerTopic, msg.toXML());
                                                             } else {
                                                                 kafkaProducer.send(odkTransformerTopic, msg.toXML());
@@ -263,7 +296,7 @@ public class ReactiveConsumer {
      */
     private String getFederatedUsersMeta(JsonNode botNode, JsonNode transformer) {
     	String botId = botNode.get("id").asText();
-    	
+
     	/* Get federated users from federation services */
         JSONArray users = userService.getUsersFromFederatedServers(botId);
 
@@ -278,7 +311,7 @@ public class ReactiveConsumer {
             ObjectNode node = mapper.createObjectNode();
             node.put("body", transformerMeta.get("body").asText());
             node.put("type", transformerMeta.get("templateType").asText());
-        	
+
         	ArrayNode sampleData = mapper.createArrayNode();
         	for (int i = 0; i < users.length(); i++) {
             	ObjectNode userData = mapper.createObjectNode();
@@ -294,12 +327,12 @@ public class ReactiveConsumer {
             	sampleData.add(userData);
         	}
         	node.put("sampleData", sampleData);
-        	
+
         	/* Fetch user messages by template from template service */
         	ArrayList<JSONObject> usersMessage = userService.getUsersMessageByTemplate(node);
-            
+
         	log.info("usersMessage: "+usersMessage);
-        	
+
         	/* Set User messages against the user phone */
         	ObjectNode federatedUsersMeta = mapper.createObjectNode();
         	ArrayNode userMetaData = mapper.createArrayNode();
@@ -409,10 +442,10 @@ public class ReactiveConsumer {
      */
     private String getFAUserIdForApp(String deviceID, UUID appID) {
     	String userID = null;
-    
+
     	Object result = redisCacheService.getFAUserIDForAppCache(getFACacheName(deviceID, appID));
     	userID = result != null ? result.toString() : null;
-    	
+
     	if(userID == null || userID.isEmpty()) {
     		ClientResponse<UserResponse, Errors> response = botService.fusionAuthClient.retrieveUserByUsername(deviceID);
             
@@ -477,7 +510,7 @@ public class ReactiveConsumer {
      * @return
      */
     private Mono<String> getLastMessageID(XMessage msg) {
-        if (msg != null && msg.getMessageType().toString().equalsIgnoreCase("text")) {
+        if (msg != null && msg.getFrom() != null && msg.getFrom().getUserID() != null && msg.getMessageType().toString().equalsIgnoreCase("text")) {
             return getLatestXMessage(msg.getFrom().getUserID(), yesterday, "SENT").map(new Function<XMessageDAO, String>() {
                 @Override
                 public String apply(XMessageDAO msg1) {
@@ -489,13 +522,15 @@ public class ReactiveConsumer {
                 }
             });
 
-        } else if (msg != null && msg.getMessageType().toString().equalsIgnoreCase("button")) {
+        } else if (msg != null && msg.getFrom() != null && msg.getFrom().getUserID() != null && msg.getMessageType().toString().equalsIgnoreCase("button")) {
             return getLatestXMessage(msg.getFrom().getUserID(), yesterday, "SENT").map(new Function<XMessageDAO, String>() {
                 @Override
                 public String apply(XMessageDAO lastMessage) {
                     return String.valueOf(lastMessage.getId());
                 }
             });
+        } else {
+            log.error("UserId not found : "+msg.toString());
         }
         return Mono.empty();
     }
@@ -549,5 +584,28 @@ public class ReactiveConsumer {
         SenderReceiverInfo to = xMessage.getTo();
         xMessage.setFrom(to);
         xMessage.setTo(from);
+    }
+
+    /**
+     * Convert Federated users into chunks
+     * @param users
+     * @param chunkSize
+     * @return
+     */
+    private List<JSONArray> chunkArrayList(JSONArray users, int chunkSize) {
+        if (users != null && users.length() > 0) {
+            ArrayList<JSONArray> chunksList = new ArrayList<>();
+            chunksList.add(new JSONArray());
+            for (int x = 0; x < users.length(); x++) {
+                JSONObject user = users.getJSONObject(x);
+                if (chunksList.get(chunksList.size() - 1).length() == chunkSize)
+                    chunksList.add(new JSONArray());
+                chunksList.get(chunksList.size() - 1).put(user);
+            }
+            return chunksList;
+        } else{
+            log.error("Federated Users null found : "+users);
+            return null;
+        }
     }
 }
