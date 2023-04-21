@@ -249,7 +249,11 @@ public class ReactiveConsumer {
                         ? transformerMeta.findValue("formID").asText()
                         : "");
                 if (transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
-                    metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer));
+                    if(xMessage != null && xMessage.getFrom() != null && xMessage.getFrom().getMeta() != null && xMessage.getFrom().getMeta().containsKey("page")){
+                        metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, xMessage.getFrom().getMeta().get("page")));
+                    } else{
+                        metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, null));
+                    }
                 }
 
                 if (transformerMeta.findValue("hiddenFields") != null && !transformerMeta.findValue("hiddenFields").isEmpty()) {
@@ -294,11 +298,11 @@ public class ReactiveConsumer {
      * @param transformer
      * @return Federated users as json string
      */
-    private String getFederatedUsersMeta(JsonNode botNode, JsonNode transformer) {
+    private String getFederatedUsersMeta(JsonNode botNode, JsonNode transformer, String page) {
     	String botId = botNode.get("id").asText();
 
     	/* Get federated users from federation services */
-        JSONArray users = userService.getUsersFromFederatedServers(botId);
+        JSONArray users = userService.getUsersFromFederatedServers(botId, page);
 
         /* Check if users, & related meta data exists in transformer */
         if(users != null && transformer.get("meta") != null
