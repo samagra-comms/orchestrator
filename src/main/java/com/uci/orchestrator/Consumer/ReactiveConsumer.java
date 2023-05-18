@@ -102,10 +102,10 @@ public class ReactiveConsumer {
     public void onMessage(@Payload String stringMessage) {
         try {
             final long startTime = System.nanoTime();
-            logTimeTaken(startTime, 0);
+            logTimeTaken(startTime, 0, null);
             XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.getBytes()));
             SenderReceiverInfo from = msg.getFrom();
-            logTimeTaken(startTime, 1);
+            logTimeTaken(startTime, 1, null);
             botService.getBotNodeFromName(msg.getApp()).doOnNext(new Consumer<JsonNode>() {
                 @Override
                 public void accept(JsonNode botNode) {
@@ -131,7 +131,7 @@ public class ReactiveConsumer {
                                         // msg.setFrom(from);
                                         getLastMessageID(msg)
                                                 .doOnNext(lastMessageID -> {
-                                                    logTimeTaken(startTime, 4);
+                                                    logTimeTaken(startTime, 4, null);
                                                     msg.setLastMessageID(lastMessageID);
 
                                                     /* Switch From & To */
@@ -182,7 +182,7 @@ public class ReactiveConsumer {
                                                         } catch (JAXBException e) {
                                                             e.printStackTrace();
                                                         }
-                                                        logTimeTaken(startTime, 15);
+                                                        logTimeTaken(startTime, 0, "process-end: %d ms");
                                                     }
                                                 })
                                                 .doOnError(new Consumer<Throwable>() {
@@ -502,10 +502,14 @@ public class ReactiveConsumer {
      * @param startTime
      * @param checkpointID
      */
-    private void logTimeTaken(long startTime, int checkpointID) {
+    private void logTimeTaken(long startTime, int checkpointID, String formatedMsg) {
         long endTime = System.nanoTime();
         long duration = (endTime - startTime) / 1000000;
-        log.info(String.format("CP-%d: %d ms", checkpointID, duration));
+        if(formatedMsg == null) {
+            log.info(String.format("CP-%d: %d ms", checkpointID, duration));
+        } else {
+            log.info(String.format(formatedMsg, duration));
+        }
     }
 
     /**
