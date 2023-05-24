@@ -133,6 +133,8 @@ public class ReactiveConsumer {
                                         // msg.setFrom(from);
                                         try {
                                             if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
+                                                /* Switch From & To */
+                                                switchFromTo(msg);
                                                 Integer chunkSize = null;
                                                 try {
                                                     chunkSize = Integer.parseInt(broadcastNotificationChunkSize);
@@ -164,7 +166,7 @@ public class ReactiveConsumer {
                                                     kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
                                                 }
                                                 notificationProcessedCount++;
-                                                log.info("Notification processed : " + notificationProcessedCount);
+                                                logTimeTaken(startTime, 0, "Notification processed : " + notificationProcessedCount + "  :: process-end: %d ms");
                                             } else {
                                                 getLastMessageID(msg)
                                                         .doOnNext(lastMessageID -> {
@@ -260,6 +262,7 @@ public class ReactiveConsumer {
                         : "");
                 if (transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
                     if(xMessage != null && xMessage.getFrom() != null && xMessage.getFrom().getMeta() != null && xMessage.getFrom().getMeta().containsKey("page")){
+                        log.info("page number orch : "+ xMessage.getFrom().getMeta().get("page"));
                         metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, xMessage.getFrom().getMeta().get("page")));
                     } else{
                         metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, null));
