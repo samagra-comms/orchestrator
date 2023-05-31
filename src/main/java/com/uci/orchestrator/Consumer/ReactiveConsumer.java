@@ -71,7 +71,7 @@ public class ReactiveConsumer {
 
     @Value("${odk-transformer}")
     public String odkTransformerTopic;
-    
+
     @Value("${broadcast-transformer}")
     public String broadcastTransformerTopic;
 
@@ -80,7 +80,7 @@ public class ReactiveConsumer {
 
     @Autowired
     public BotService botService;
-    
+
     @Autowired
     private UserService userService;
 
@@ -89,7 +89,7 @@ public class ReactiveConsumer {
 
     @Autowired
     private RedisCacheService redisCacheService;
-    
+
     public AESWrapper encryptor;
 
     private final String DEFAULT_APP_NAME = "Global Bot";
@@ -109,19 +109,23 @@ public class ReactiveConsumer {
             final long startTime = System.nanoTime();
             logTimeTaken(startTime, 0, null);
             XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.getBytes()));
-            consumeCount++;
-            log.info("Consume topic count : " + consumeCount);
+
+            if (msg != null && msg.getProvider().equalsIgnoreCase("firebase")) {
+                consumeCount++;
+                log.info("Consume topic by Orchestrator count : " + consumeCount);
+            }
+
             SenderReceiverInfo from = msg.getFrom();
             logTimeTaken(startTime, 1, null);
             botService.getBotNodeFromName(msg.getApp()).doOnNext(new Consumer<JsonNode>() {
                 @Override
                 public void accept(JsonNode botNode) {
-                    if(botNode != null && !botNode.isEmpty()) {
+                    if (botNode != null && !botNode.isEmpty()) {
                         from.setCampaignID(msg.getApp());
-                        if(from.getDeviceType() == null) {
+                        if (from.getDeviceType() == null) {
                             from.setDeviceType(DeviceType.PHONE);
                         }
-                        if(msg.getAdapterId() == null || msg.getAdapterId().isEmpty()) {
+                        if (msg.getAdapterId() == null || msg.getAdapterId().isEmpty()) {
                             msg.setAdapterId(BotUtil.getBotNodeAdapterId(botNode));
                         }
                         /* Set XMessage Transformers */
@@ -136,46 +140,57 @@ public class ReactiveConsumer {
                                     public void accept(XMessage msg) {
                                         SenderReceiverInfo from = msg.getFrom();
                                         // msg.setFrom(from);
-                                        try {
-                                            if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
+                                        if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
+                                            try {
                                                 /* Switch From & To */
                                                 switchFromTo(msg);
                                                 Integer chunkSize = null;
                                                 try {
                                                     chunkSize = Integer.parseInt(broadcastNotificationChunkSize);
-                                                } catch(NumberFormatException ex){
+                                                } catch (NumberFormatException ex) {
                                                     chunkSize = null;
                                                 }
-                                                if(chunkSize != null) {
+                                                if (chunkSize != null) {
                                                     if (msg.getTransformers() != null && msg.getTransformers().size() > 0 && msg.getTransformers().get(0) != null
                                                             && msg.getTransformers().get(0).getMetaData() != null && msg.getTransformers().get(0).getMetaData().get("federatedUsers") != null) {
                                                         JSONArray federatedUsers = new JSONObject(msg.getTransformers().get(0).getMetaData().get("federatedUsers")).getJSONArray("list");
                                                         int totalFederatedUsers = federatedUsers.length();
                                                         if (totalFederatedUsers <= chunkSize) {
+                                                            log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: "+totalFederatedUsers);
                                                             kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
                                                         } else {
                                                             List<JSONArray> jsonArrayList = chunkArrayList(federatedUsers, chunkSize);
                                                             int count = 1;
                                                             for (JSONArray jsonArray : jsonArrayList) {
-                                                                log.info("Total Federated Users : " + federatedUsers.length() + " Chunk size : " + jsonArray.length() + " Sent to kafka : "+count);
+                                                                log.info("Total Federated Users : " + federatedUsers.length() + " Chunk size : " + jsonArray.length() + " Sent to kafka : " + count);
                                                                 msg.getTransformers().get(0).getMetaData().put("federatedUsers", new JSONObject().put("list", jsonArray).toString());
+                                                                log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: "+jsonArray.length());
                                                                 kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
                                                                 count++;
                                                             }
                                                         }
                                                     } else {
-                                                        log.error("federatedUsers not found : " + msg.toString());
-                                                        kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                        log.error("ReactiveConsumer:federatedUsers not found in xMessage: " + msg);
                                                     }
-                                                } else{
-                                                    kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                } else {
+                                                    if (msg.getTransformers() != null && msg.getTransformers().size() > 0 && msg.getTransformers().get(0) != null
+                                                            && msg.getTransformers().get(0).getMetaData() != null && msg.getTransformers().get(0).getMetaData().get("federatedUsers") != null) {
+                                                        JSONArray federatedUsers = new JSONObject(msg.getTransformers().get(0).getMetaData().get("federatedUsers")).getJSONArray("list");
+                                                        log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: " + federatedUsers.length());
+                                                        kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                    } else {
+                                                        log.error("ReactiveConsumer:federatedUsers not found in xMessage: " + msg);
+                                                    }
                                                 }
                                                 pushCount++;
                                                 notificationProcessedCount++;
-                                                logTimeTaken(startTime, 0, "Notification processed : " + notificationProcessedCount + " :: Push count : "
-                                                        + pushCount + " :: process-end: %d ms");
-
-                                            } else {
+                                                logTimeTaken(startTime, 0, "Notification processed by orchestrator: " + notificationProcessedCount + " :: Push count : "
+                                                        + pushCount + " :: orchestrator-notification-process-end-time: %d ms");
+                                            } catch (Exception ex) {
+                                                log.error("ReactiveConsumer:Notification Triggering Process:Error in pushing xMessage to kafka: "+ex.getMessage());
+                                            }
+                                        } else {
+                                            try {
                                                 log.info("Calling ODK : " + msg.toString());
                                                 getLastMessageID(msg)
                                                         .doOnNext(lastMessageID -> {
@@ -207,12 +222,11 @@ public class ReactiveConsumer {
                                                             }
                                                         })
                                                         .subscribe();
+                                            } catch (Exception ex) {
+                                                log.error("ReactiveConsumer:ODK and Generic Bot Processing:Exception: "+ex.getMessage());
                                             }
-                                        } catch (JAXBException ex) {
-                                            log.error("Error while converting toXML() : " + ex.getMessage());
-                                        } catch (Exception ex){
-                                            log.error("An Error Occurred : " + ex.getMessage());
                                         }
+
                                     }
                                 })
                                 .doOnError(new Consumer<Throwable>() {
@@ -222,7 +236,7 @@ public class ReactiveConsumer {
                                     }
                                 }).subscribe();
                     } else {
-                        log.error("Bot node not found by name: "+msg.getApp());
+                        log.error("Bot node not found by name: " + msg.getApp());
                     }
 
                 }
@@ -235,99 +249,106 @@ public class ReactiveConsumer {
 
     /**
      * Set Transformer in XMessage with transformer required data in meta
+     *
      * @param xMessage
      * @param botNode
      * @return XMessage
      */
     private XMessage setXMessageTransformers(XMessage xMessage, JsonNode botNode) {
-        ArrayList<Transformer> transformers = new ArrayList<Transformer>();
+        try {
+            ArrayList<Transformer> transformers = new ArrayList<Transformer>();
 
-        ArrayList transformerList = (ArrayList) botNode.findValues("transformers");
-        transformerList.forEach(transformerTmp -> {
-            JsonNode transformerNode = (JsonNode) transformerTmp;
-            int i = 0;
-            while (transformerNode.get(i) != null && transformerNode.get(i).path("meta") != null) {
-                JsonNode transformer = transformerNode.get(i);
-                JsonNode transformerMeta = transformer.path("meta") != null
-                        ? transformer.path("meta") : null;
-                log.info("transformer:" + transformer);
+            ArrayList transformerList = (ArrayList) botNode.findValues("transformers");
+            transformerList.forEach(transformerTmp -> {
+                JsonNode transformerNode = (JsonNode) transformerTmp;
+                int i = 0;
+                while (transformerNode.get(i) != null && transformerNode.get(i).path("meta") != null) {
+                    JsonNode transformer = transformerNode.get(i);
+                    JsonNode transformerMeta = transformer.path("meta") != null
+                            ? transformer.path("meta") : null;
+                    log.info("transformer:" + transformer);
 
-                HashMap<String, String> metaData = new HashMap<String, String>();
-                /* Bot Data */
-                metaData.put("startingMessage", BotUtil.getBotNodeData(botNode, "startingMessage"));
-                metaData.put("botId", BotUtil.getBotNodeData(botNode, "id"));
-                metaData.put("botOwnerID", BotUtil.getBotNodeData(botNode, "ownerID"));
-                metaData.put("botOwnerOrgID", BotUtil.getBotNodeData(botNode, "ownerOrgID"));
+                    HashMap<String, String> metaData = new HashMap<String, String>();
+                    /* Bot Data */
+                    metaData.put("startingMessage", BotUtil.getBotNodeData(botNode, "startingMessage"));
+                    metaData.put("botId", BotUtil.getBotNodeData(botNode, "id"));
+                    metaData.put("botOwnerID", BotUtil.getBotNodeData(botNode, "ownerID"));
+                    metaData.put("botOwnerOrgID", BotUtil.getBotNodeData(botNode, "ownerOrgID"));
 
-                /* Transformer Data */
-                metaData.put("id", transformer.get("id").asText());
-                metaData.put("type", transformerMeta.get("type") != null
-                        && !transformerMeta.get("type").asText().isEmpty()
-                        ? transformerMeta.get("type").asText()
-                        : "");
-                metaData.put("formID", transformerMeta.findValue("formID") != null
-                        && !transformerMeta.findValue("formID").asText().isEmpty()
-                        ? transformerMeta.findValue("formID").asText()
-                        : "");
-                if (transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
-                    if(xMessage != null && xMessage.getFrom() != null && xMessage.getFrom().getMeta() != null && xMessage.getFrom().getMeta().containsKey("page")){
-                        log.info("page number orch : "+ xMessage.getFrom().getMeta().get("page"));
-                        metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, xMessage.getFrom().getMeta().get("page")));
-                    } else{
-                        metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, null));
+                    /* Transformer Data */
+                    metaData.put("id", transformer.get("id").asText());
+                    metaData.put("type", transformerMeta.get("type") != null
+                            && !transformerMeta.get("type").asText().isEmpty()
+                            ? transformerMeta.get("type").asText()
+                            : "");
+                    metaData.put("formID", transformerMeta.findValue("formID") != null
+                            && !transformerMeta.findValue("formID").asText().isEmpty()
+                            ? transformerMeta.findValue("formID").asText()
+                            : "");
+                    if (transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
+                        if (xMessage != null && xMessage.getFrom() != null && xMessage.getFrom().getMeta() != null && xMessage.getFrom().getMeta().containsKey("page")) {
+                            log.info("page number orch : " + xMessage.getFrom().getMeta().get("page"));
+                            metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, xMessage.getFrom().getMeta().get("page")));
+                        } else {
+                            metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, null));
+                        }
                     }
-                }
 
-                if (transformerMeta.findValue("hiddenFields") != null && !transformerMeta.findValue("hiddenFields").isEmpty()) {
-                    metaData.put("hiddenFields", transformerMeta.findValue("hiddenFields").toString());
-                }
-
-                if (transformer.findValue("serviceClass") != null && !transformer.findValue("serviceClass").asText().isEmpty()) {
-                    String serviceClass = transformer.findValue("serviceClass").toString();
-                    if (serviceClass != null && !serviceClass.isEmpty() && serviceClass.contains("\"")) {
-                        serviceClass = serviceClass.replaceAll("\"", "");
+                    if (transformerMeta.findValue("hiddenFields") != null && !transformerMeta.findValue("hiddenFields").isEmpty()) {
+                        metaData.put("hiddenFields", transformerMeta.findValue("hiddenFields").toString());
                     }
-                    metaData.put("serviceClass", serviceClass);
+
+                    if (transformer.findValue("serviceClass") != null && !transformer.findValue("serviceClass").asText().isEmpty()) {
+                        String serviceClass = transformer.findValue("serviceClass").toString();
+                        if (serviceClass != null && !serviceClass.isEmpty() && serviceClass.contains("\"")) {
+                            serviceClass = serviceClass.replaceAll("\"", "");
+                        }
+                        metaData.put("serviceClass", serviceClass);
+                    }
+
+                    if (transformerMeta.get("templateId") != null && !transformerMeta.get("templateId").asText().isEmpty()) {
+                        metaData.put("templateId", transformerMeta.get("templateId").asText());
+                    }
+
+                    if (transformerMeta.get("title") != null && !transformerMeta.get("title").asText().isEmpty()) {
+                        metaData.put("title", transformerMeta.get("title").asText());
+                    }
+
+                    if (transformer.get("type") != null && transformer.get("type").asText().equals(BotUtil.transformerTypeGeneric)) {
+                        metaData.put("url", transformer.findValue("url").asText());
+                    }
+
+                    Transformer transf = new Transformer();
+                    transf.setId(transformer.get("id").asText());
+                    transf.setMetaData(metaData);
+
+                    transformers.add(transf);
+                    i++;
                 }
-
-                if (transformerMeta.get("templateId") != null && !transformerMeta.get("templateId").asText().isEmpty()) {
-                    metaData.put("templateId", transformerMeta.get("templateId").asText());
-                }
-
-                if (transformerMeta.get("title") != null && !transformerMeta.get("title").asText().isEmpty()) {
-                    metaData.put("title", transformerMeta.get("title").asText());
-                }
-
-                if (transformer.get("type") != null && transformer.get("type").asText().equals(BotUtil.transformerTypeGeneric)) {
-                    metaData.put("url", transformer.findValue("url").asText());
-                }
-
-                Transformer transf = new Transformer();
-                transf.setId(transformer.get("id").asText());
-                transf.setMetaData(metaData);
-
-                transformers.add(transf);
-                i++;
-            }
-        });
-        xMessage.setTransformers(transformers);
-        return xMessage;
+            });
+            xMessage.setTransformers(transformers);
+            return xMessage;
+        } catch (Exception ex) {
+            log.error("Error:setXMessageTransformers::Exception:" + ex.getMessage());
+            return null;
+        }
     }
 
     /**
      * Get Federated Users Data for Broadcast transformer
+     *
      * @param botNode
      * @param transformer
      * @return Federated users as json string
      */
     private String getFederatedUsersMeta(JsonNode botNode, JsonNode transformer, String page) {
-    	String botId = botNode.get("id").asText();
+        String botId = botNode.get("id").asText();
 
-    	/* Get federated users from federation services */
+        /* Get federated users from federation services */
         JSONArray users = userService.getUsersFromFederatedServers(botId, page);
 
         /* Check if users, & related meta data exists in transformer */
-        if(users != null && transformer.get("meta") != null
+        if (users != null && transformer.get("meta") != null
                 && transformer.get("meta").get("templateType") != null
                 && transformer.get("meta").get("body") != null) {
             ObjectNode transformerMeta = (ObjectNode) transformer.get("meta");
@@ -338,58 +359,58 @@ public class ReactiveConsumer {
             node.put("body", transformerMeta.get("body").asText());
             node.put("type", transformerMeta.get("templateType").asText());
 
-        	ArrayNode sampleData = mapper.createArrayNode();
-        	for (int i = 0; i < users.length(); i++) {
-            	ObjectNode userData = mapper.createObjectNode();
-                if(transformerMeta.get("params") != null && !transformerMeta.get("params").toString().isEmpty()){
+            ArrayNode sampleData = mapper.createArrayNode();
+            for (int i = 0; i < users.length(); i++) {
+                ObjectNode userData = mapper.createObjectNode();
+                if (transformerMeta.get("params") != null && !transformerMeta.get("params").toString().isEmpty()) {
                     JSONArray paramArr = new JSONArray(transformerMeta.get("params").toString());
-                    for(int k=0; k<paramArr.length(); k++){
-                        if(!((JSONObject) users.get(i)).isNull(paramArr.getString(k))){
+                    for (int k = 0; k < paramArr.length(); k++) {
+                        if (!((JSONObject) users.get(i)).isNull(paramArr.getString(k))) {
                             userData.put(paramArr.getString(k), ((JSONObject) users.get(i)).getString(paramArr.getString(k)));
                         }
                     }
                 }
-            	userData.put("__index", i);
-            	sampleData.add(userData);
-        	}
-        	node.put("sampleData", sampleData);
+                userData.put("__index", i);
+                sampleData.add(userData);
+            }
+            node.put("sampleData", sampleData);
 
-        	/* Fetch user messages by template from template service */
-        	ArrayList<JSONObject> usersMessage = userService.getUsersMessageByTemplate(node);
+            /* Fetch user messages by template from template service */
+            ArrayList<JSONObject> usersMessage = userService.getUsersMessageByTemplate(node);
 
-        	log.info("usersMessage: "+usersMessage);
+            log.info("ReactiveConsumer:getUsersMessageByTemplate::Count: " + usersMessage.size());
 
-        	/* Set User messages against the user phone */
-        	ObjectNode federatedUsersMeta = mapper.createObjectNode();
-        	ArrayNode userMetaData = mapper.createArrayNode();
+            /* Set User messages against the user phone */
+            ObjectNode federatedUsersMeta = mapper.createObjectNode();
+            ArrayNode userMetaData = mapper.createArrayNode();
             usersMessage.forEach(userMsg -> {
-        		int j = Integer.parseInt(userMsg.get("__index").toString());
+                int j = Integer.parseInt(userMsg.get("__index").toString());
                 JSONObject userObj = ((JSONObject) users.get(j));
-        		String userPhone = userObj.getString("phoneNo");
+                String userPhone = userObj.getString("phoneNo");
 
-        		ObjectNode map = mapper.createObjectNode();
-        		map.put("phone", userPhone);
-        		map.put("message", userMsg.get("body").toString());
-                try{
+                ObjectNode map = mapper.createObjectNode();
+                map.put("phone", userPhone);
+                map.put("message", userMsg.get("body").toString());
+                try {
                     /* FCM Token */
-                    if(userObj.get("fcmToken") != null) {
+                    if (userObj.get("fcmToken") != null) {
                         map.put("fcmToken", userObj.getString("fcmToken"));
                     }
                     /* FCM - If clickActionUrl found in userObj, use it, override previous one */
-                    if(userObj.get("fcmClickActionUrl") != null) {
+                    if (userObj.get("fcmClickActionUrl") != null) {
                         map.put("fcmClickActionUrl", userObj.getString("fcmClickActionUrl"));
                     }
-                    if(transformerMeta.get("data") != null){
+                    if (transformerMeta.get("data") != null) {
                         map.put("data", transformerMeta.get("data"));
                     }
                 } catch (Exception e) {
-                    //
+                    log.error("ErrorParsingUserObj:getFederatedUsersMeta::Exception: " + e.getMessage());
                 }
 
                 userMetaData.add(map);
-        		log.info("index: "+j+", body: "+userMsg.get("body").toString()+", phone:"+userPhone);
-        	});
-            
+                log.info("index: " + j + ", body: " + userMsg.get("body").toString() + ", phone:" + userPhone);
+            });
+
             federatedUsersMeta.put("list", userMetaData);
 
             return federatedUsersMeta.toString();
@@ -399,6 +420,7 @@ public class ReactiveConsumer {
 
     /**
      * Resolve User - Fetch user if exists or register it in Fusion Auth Client
+     *
      * @param xmsg
      * @param appId
      * @return
@@ -408,17 +430,17 @@ public class ReactiveConsumer {
             SenderReceiverInfo from = xmsg.getFrom();
             String appName = xmsg.getApp();
             Boolean found = false;
-            
+
             UUID appID = UUID.fromString(appId);
-            
+
             String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
             String encodedBase64Key = encodeKey(secret);
             String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
-            log.info("deviceString: "+deviceString+", encyprted deviceString: "+deviceID);
+            log.info("ReactiveConsumer:resolveUser::Calling:deviceString: " + deviceString + ", encyprted deviceString: " + deviceID);
             String userID = getFAUserIdForApp(deviceID, appID);
-            
+
             if (userID != null && !userID.isEmpty()) {
-            	log.info("Found FA user id");
+                log.info("ReactiveConsumer:resolveUser::Found FA user id: " + userID);
                 from.setDeviceID(userID);
                 from.setEncryptedDeviceID(deviceID);
                 xmsg.setFrom(from);
@@ -428,14 +450,13 @@ public class ReactiveConsumer {
                         .flatMap(new Function<Pair<Boolean, String>, Mono<XMessage>>() {
                             @Override
                             public Mono<XMessage> apply(Pair<Boolean, String> result) {
-                            	log.info("FA update user");
                                 if (result.getLeft()) {
                                     from.setDeviceID(result.getRight());
                                     from.setEncryptedDeviceID(deviceID);
                                     xmsg.setFrom(from);
                                     ClientResponse<UserResponse, Errors> response = botService.fusionAuthClient.retrieveUserByUsername(deviceID);
                                     if (response.wasSuccessful() && isUserRegistered(response, appID)) {
-                                    	redisCacheService.setFAUserIDForAppCache(getFACacheName(deviceID, appID), response.successResponse.user.id.toString());
+                                        redisCacheService.setFAUserIDForAppCache(getFACacheName(deviceID, appID), response.successResponse.user.id.toString());
                                         return Mono.just(xmsg);
                                     } else {
                                         return Mono.just(xmsg);
@@ -448,86 +469,90 @@ public class ReactiveConsumer {
                         }).doOnError(new Consumer<Throwable>() {
                             @Override
                             public void accept(Throwable throwable) {
-                                log.error("Error in updateUser" + throwable.getMessage());
+                                log.error("ReactiveConsumer:resolveUser::Calling update user: " + throwable.getMessage());
                             }
                         });
             }
         } catch (Exception e) {
             e.printStackTrace();
-            log.error("Error in resolveUser" + e.getMessage());
+            log.error("ReactiveConsumer:resolveUser::Error in resolving user: " + e.getMessage());
             xmsg.setFrom(null);
             return Mono.just(xmsg);
         }
     }
-    
+
     /**
      * Get Fusion Auth User's UUID for App
+     *
      * @param deviceID
      * @param appID
      * @return
      */
     private String getFAUserIdForApp(String deviceID, UUID appID) {
-    	String userID = null;
+        String userID = null;
 
-    	Object result = redisCacheService.getFAUserIDForAppCache(getFACacheName(deviceID, appID));
-    	userID = result != null ? result.toString() : null;
+        Object result = redisCacheService.getFAUserIDForAppCache(getFACacheName(deviceID, appID));
+        userID = result != null ? result.toString() : null;
 
-    	if(userID == null || userID.isEmpty()) {
-    		ClientResponse<UserResponse, Errors> response = botService.fusionAuthClient.retrieveUserByUsername(deviceID);
-            
+        if (userID == null || userID.isEmpty()) {
+            ClientResponse<UserResponse, Errors> response = botService.fusionAuthClient.retrieveUserByUsername(deviceID);
+
             if (response.wasSuccessful() && isUserRegistered(response, appID)) {
-            	userID = response.successResponse.user.id.toString();
-            	redisCacheService.setFAUserIDForAppCache(getFACacheName(deviceID, appID), userID);
+                userID = response.successResponse.user.id.toString();
+                redisCacheService.setFAUserIDForAppCache(getFACacheName(deviceID, appID), userID);
             }
-    	}
+        }
         return userID;
     }
-    
+
     /**
      * Check if FA user is registered for appid
+     *
      * @param response
      * @param appID
      * @return
      */
     private Boolean isUserRegistered(ClientResponse<UserResponse, Errors> response, UUID appID) {
-    	List<UserRegistration> registrations = response.successResponse.user.getRegistrations();
-    	for(int i=0; i<registrations.size(); i++) {
-    		if(registrations.get(i).applicationId.equals(appID)) {
-    			return true;
-    		}
-    	}
-    	return false;
+        List<UserRegistration> registrations = response.successResponse.user.getRegistrations();
+        for (int i = 0; i < registrations.size(); i++) {
+            if (registrations.get(i).applicationId.equals(appID)) {
+                return true;
+            }
+        }
+        return false;
     }
-    
+
     private String getFACacheName(String deviceID, UUID appID) {
-    	return deviceID+"-"+appID.toString();
+        return deviceID + "-" + appID.toString();
     }
 
     /**
      * Update fusion auth user data
+     *
      * @param user
      */
     private void updateFAUser(User user) {
         System.out.println(user);
         UserRequest r = new UserRequest(user);
-        
+
         ClientResponse<UserResponse, Errors> response = botService.fusionAuthClient.updateUser(user.id, r);
-        if(response.wasSuccessful()) {
+        if (response.wasSuccessful()) {
             System.out.println("user update success");
         } else {
-            System.out.println("error in user update"+response.errorResponse);
+            System.out.println("error in user update" + response.errorResponse);
         }
     }
 
     /**
      * Log time taken between two checkpoints
+     *
      * @param startTime
      * @param checkpointID
      */
     private void logTimeTaken(long startTime, int checkpointID, String formatedMsg) {
         long endTime = System.nanoTime();
         long duration = (endTime - startTime) / 1000000;
-        if(formatedMsg == null) {
+        if (formatedMsg == null) {
             log.info(String.format("CP-%d: %d ms", checkpointID, duration));
         } else {
             log.info(String.format(formatedMsg, duration));
@@ -536,6 +561,7 @@ public class ReactiveConsumer {
 
     /**
      * Get Last XMessage ID of user
+     *
      * @param msg
      * @return
      */
@@ -560,13 +586,14 @@ public class ReactiveConsumer {
                 }
             });
         } else {
-            log.error("UserId not found : "+msg.toString());
+            log.error("UserId not found : " + msg.toString());
         }
         return Mono.empty();
     }
 
     /**
      * Get Latest XMessage of a user
+     *
      * @param userID
      * @param yesterday
      * @param messageState
@@ -607,6 +634,7 @@ public class ReactiveConsumer {
 
     /**
      * Switch from & To in XMessage
+     *
      * @param xMessage
      */
     private void switchFromTo(XMessage xMessage) {
@@ -618,6 +646,7 @@ public class ReactiveConsumer {
 
     /**
      * Convert Federated users into chunks
+     *
      * @param users
      * @param chunkSize
      * @return
@@ -633,8 +662,8 @@ public class ReactiveConsumer {
                 chunksList.get(chunksList.size() - 1).put(user);
             }
             return chunksList;
-        } else{
-            log.error("Federated Users null found : "+users);
+        } else {
+            log.error("Federated Users null found : " + users);
             return null;
         }
     }
