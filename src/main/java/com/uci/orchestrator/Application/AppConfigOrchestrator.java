@@ -12,6 +12,7 @@ import org.kie.api.runtime.KieSession;
 import org.kie.internal.io.ResourceFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -50,7 +51,7 @@ public class AppConfigOrchestrator {
     public String FUSIONAUTH_KEY;
     
     @Autowired
-    public Cache<Object, Object> cache;
+    public CacheManager cacheManager;
 
     @Bean
     public FusionAuthClient getFAClient() {
@@ -64,7 +65,7 @@ public class AppConfigOrchestrator {
                 .defaultHeader("admin-token", CAMPAIGN_ADMIN_TOKEN)
                 .build();
         FusionAuthClient fusionAuthClient = getFAClient();
-        return new CampaignService(webClient, fusionAuthClient, cache);
+        return new CampaignService(webClient, fusionAuthClient, cacheManager);
     }
 
     @Bean
