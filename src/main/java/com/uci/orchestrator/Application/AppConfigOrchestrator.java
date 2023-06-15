@@ -88,7 +88,7 @@ public class AppConfigOrchestrator {
         configuration.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, org.springframework.kafka.support.serializer.JsonSerializer.class);
         configuration.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, org.springframework.kafka.support.serializer.JsonSerializer.class);
         configuration.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest");
-        configuration.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "true");
+        configuration.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, true);
         return configuration;
     }
 
