@@ -33,6 +33,7 @@ import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
 
@@ -103,13 +104,13 @@ public class ReactiveConsumer {
     private long consumeCount;
     private long pushCount;
 
-    @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
-    public void onMessage(@Payload String stringMessage) {
+    @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"}, containerFactory = "kafkaManualAckListenerContainerFactory")
+    public void onMessage(@Payload String stringMessage, Acknowledgment acknowledgment) {
         try {
             final long startTime = System.nanoTime();
             logTimeTaken(startTime, 0, null);
             XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.getBytes()));
-
+            acknowledgment.acknowledge();
             if (msg != null && msg.getProvider().equalsIgnoreCase("firebase")) {
                 consumeCount++;
                 log.info("Consume topic by Orchestrator count : " + consumeCount);
@@ -142,6 +143,7 @@ public class ReactiveConsumer {
                                         // msg.setFrom(from);
                                         if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
                                             try {
+                                                log.info("broadcastNotificationChunkSize : " + broadcastNotificationChunkSize);
                                                 /* Switch From & To */
                                                 switchFromTo(msg);
                                                 Integer chunkSize = null;
@@ -156,7 +158,7 @@ public class ReactiveConsumer {
                                                         JSONArray federatedUsers = new JSONObject(msg.getTransformers().get(0).getMetaData().get("federatedUsers")).getJSONArray("list");
                                                         int totalFederatedUsers = federatedUsers.length();
                                                         if (totalFederatedUsers <= chunkSize) {
-                                                            log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: "+totalFederatedUsers);
+                                                            log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: " + totalFederatedUsers);
                                                             kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
                                                         } else {
                                                             List<JSONArray> jsonArrayList = chunkArrayList(federatedUsers, chunkSize);
@@ -164,7 +166,7 @@ public class ReactiveConsumer {
                                                             for (JSONArray jsonArray : jsonArrayList) {
                                                                 log.info("Total Federated Users : " + federatedUsers.length() + " Chunk size : " + jsonArray.length() + " Sent to kafka : " + count);
                                                                 msg.getTransformers().get(0).getMetaData().put("federatedUsers", new JSONObject().put("list", jsonArray).toString());
-                                                                log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: "+jsonArray.length());
+                                                                log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: " + jsonArray.length());
                                                                 kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
                                                                 count++;
                                                             }
@@ -187,7 +189,7 @@ public class ReactiveConsumer {
                                                 logTimeTaken(startTime, 0, "Notification processed by orchestrator: " + notificationProcessedCount + " :: Push count : "
                                                         + pushCount + " :: orchestrator-notification-process-end-time: %d ms");
                                             } catch (Exception ex) {
-                                                log.error("ReactiveConsumer:Notification Triggering Process:Error in pushing xMessage to kafka: "+ex.getMessage());
+                                                log.error("ReactiveConsumer:Notification Triggering Process:Error in pushing xMessage to kafka: " + ex.getMessage());
                                             }
                                         } else {
                                             try {
@@ -223,7 +225,7 @@ public class ReactiveConsumer {
                                                         })
                                                         .subscribe();
                                             } catch (Exception ex) {
-                                                log.error("ReactiveConsumer:ODK and Generic Bot Processing:Exception: "+ex.getMessage());
+                                                log.error("ReactiveConsumer:ODK and Generic Bot Processing:Exception: " + ex.getMessage());
                                             }
                                         }
 
