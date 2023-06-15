@@ -104,7 +104,7 @@ public class ReactiveConsumer {
     private long consumeCount;
     private long pushCount;
 
-    @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"}, containerFactory = "kafkaManualAckListenerContainerFactory")
+    @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
     public void onMessage(@Payload String stringMessage, Acknowledgment acknowledgment) {
         try {
             final long startTime = System.nanoTime();
