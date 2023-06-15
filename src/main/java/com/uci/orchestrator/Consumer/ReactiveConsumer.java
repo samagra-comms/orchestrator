@@ -118,6 +118,7 @@ public class ReactiveConsumer {
                     if (messageIdSet.contains(messageId)) {
                         existSetCount++;
                         log.info("ReactiveConsumer:Already Counsumed : " + existSetCount + " MessageId : " + messageId);
+                        return;
                     } else {
                         insertSetCount++;
                         log.info("ReactiveConsumer:Insert in set count : " + insertSetCount + " MessageId : " + messageId);
