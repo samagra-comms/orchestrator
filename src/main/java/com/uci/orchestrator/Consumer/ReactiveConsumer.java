@@ -105,12 +105,11 @@ public class ReactiveConsumer {
     private long pushCount;
 
     @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
-    public void onMessage(@Payload String stringMessage, Acknowledgment acknowledgment) {
+    public void onMessage(@Payload String stringMessage) {
         try {
             final long startTime = System.nanoTime();
             logTimeTaken(startTime, 0, null);
             XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.getBytes()));
-            acknowledgment.acknowledge();
             if (msg != null && msg.getProvider().equalsIgnoreCase("firebase")) {
                 consumeCount++;
                 log.info("Consume topic by Orchestrator count : " + consumeCount);
