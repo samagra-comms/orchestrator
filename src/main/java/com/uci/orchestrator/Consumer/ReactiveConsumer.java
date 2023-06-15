@@ -44,11 +44,7 @@ import reactor.kafka.receiver.ReceiverRecord;
 import javax.xml.bind.JAXBException;
 import java.io.ByteArrayInputStream;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.UUID;
-import java.util.Comparator;
+import java.util.*;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -104,6 +100,10 @@ public class ReactiveConsumer {
     private long consumeCount;
     private long pushCount;
 
+    private Set<String> messageIdSet = new HashSet<>();
+
+    private long insertSetCount, existSetCount;
+
     @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
     public void onMessage(@Payload String stringMessage) {
         try {
@@ -113,6 +113,18 @@ public class ReactiveConsumer {
             if (msg != null && msg.getProvider().equalsIgnoreCase("firebase")) {
                 consumeCount++;
                 log.info("Consume topic by Orchestrator count : " + consumeCount);
+                if (msg.getMessageId() != null && msg.getMessageId().getChannelMessageId() != null) {
+                    String messageId = msg.getMessageId().getChannelMessageId();
+                    if (messageIdSet.contains(messageId)) {
+                        existSetCount++;
+                        log.info("ReactiveConsumer:Already Counsumed : " + existSetCount + " MessageId : " + messageId);
+                    } else {
+                        insertSetCount++;
+                        log.info("ReactiveConsumer:Insert in set count : " + insertSetCount + " MessageId : " + messageId);
+                        messageIdSet.add(messageId);
+                    }
+                }
+                log.info("ReactiveConsumer: Total MessageId Set : " + messageIdSet.size());
             }
 
             SenderReceiverInfo from = msg.getFrom();
@@ -142,7 +154,7 @@ public class ReactiveConsumer {
                                         // msg.setFrom(from);
                                         if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
                                             try {
-                                                log.info("broadcastNotificationChunkSize : " + broadcastNotificationChunkSize);
+                                                log.info("ReactiveConsumer:broadcastNotificationChunkSize : " + broadcastNotificationChunkSize);
                                                 /* Switch From & To */
                                                 switchFromTo(msg);
                                                 Integer chunkSize = null;
