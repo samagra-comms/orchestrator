@@ -40,7 +40,7 @@ public class OuboundConsumer {
             if (msg != null && msg.getProvider() != null && msg.getProvider().equalsIgnoreCase("firebase")
                     && msg.getChannel().equalsIgnoreCase("web")) {
                 pushNotificationCount++;
-                log.info("OutboundConsumer:onMessage:: Notification push to kafka topic count: " + pushNotificationCount);
+                log.info("OutboundConsumer:onMessage:: Notification push to kafka topic count: " + pushNotificationCount + " UserId : " + msg.getTo().getUserID());
                 kafkaProducer.send(notificationOutbound, msg.toXML());
             } else {
                 pushOtherCount++;

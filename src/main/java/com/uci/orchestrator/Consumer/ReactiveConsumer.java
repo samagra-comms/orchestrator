@@ -101,8 +101,9 @@ public class ReactiveConsumer {
     private long pushCount;
 
     private Set<String> messageIdSet = new HashSet<>();
+    private HashSet<String> federatedUsers = new HashSet<>();
 
-    private long insertSetCount, existSetCount;
+    private long insertSetCount, existSetCount, existingFederatedUsers;
 
     @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
     public void onMessage(@Payload String stringMessage) {
@@ -113,6 +114,7 @@ public class ReactiveConsumer {
             if (msg != null && msg.getProvider().equalsIgnoreCase("firebase")) {
                 consumeCount++;
                 log.info("Consume topic by Orchestrator count : " + consumeCount);
+                // This code for kafka duplication problem
                 if (msg.getMessageId() != null && msg.getMessageId().getChannelMessageId() != null) {
                     String messageId = msg.getMessageId().getChannelMessageId();
                     if (messageIdSet.contains(messageId)) {
@@ -360,6 +362,23 @@ public class ReactiveConsumer {
 
         /* Get federated users from federation services */
         JSONArray users = userService.getUsersFromFederatedServers(botId, page);
+        for (int i = 0; i < users.length(); i++) {
+            JSONObject jsonObject = (JSONObject) users.get(i);
+            if (jsonObject != null && !jsonObject.isNull("phoneNo")) {
+                String phoneNo = jsonObject.getString("phoneNo");
+                if (federatedUsers.contains(phoneNo)) {
+                    existingFederatedUsers++;
+                    log.info("ReactiveConsumer:getFederatedUsersMeta:: Duplicate Phone Number found : count: " + existingFederatedUsers + " Phone No : " + phoneNo);
+                } else {
+                    log.info("ReactiveConsumer:getFederatedUsersMeta::Inserting User in set : " + phoneNo);
+                    federatedUsers.add(phoneNo);
+                }
+            } else {
+                log.error("ReactiveConsumer:getFederatedUsersMeta::No Federated Users Found: " + users.get(i).toString());
+            }
+        }
+
+        log.info("ReactiveConsumer:getFederatedUsersMeta::Count: " + (users == null ? "user not found" : users.length()) + " >> Set count: " + federatedUsers.size());
 
         /* Check if users, & related meta data exists in transformer */
         if (users != null && transformer.get("meta") != null
@@ -391,6 +410,13 @@ public class ReactiveConsumer {
 
             /* Fetch user messages by template from template service */
             ArrayList<JSONObject> usersMessage = userService.getUsersMessageByTemplate(node);
+
+//            for (int i = 0; i < usersMessage.size(); i++) {
+//                JSONObject jsonObject = usersMessage.get(i);
+//                if(jsonObject != null && !jsonObject.isNull("")){
+//
+//                }
+//            }
 
             log.info("ReactiveConsumer:getUsersMessageByTemplate::Count: " + usersMessage.size());
 
@@ -428,6 +454,8 @@ public class ReactiveConsumer {
             federatedUsersMeta.put("list", userMetaData);
 
             return federatedUsersMeta.toString();
+        } else {
+            log.error("ReactiveConsumer:getFederatedUsersMetaElse::Users not found");
         }
         return "";
     }
