@@ -208,36 +208,38 @@ public class ReactiveConsumer {
                                         } else {
                                             try {
                                                 log.info("Calling ODK : " + msg.toString());
-                                                getLastMessageID(msg)
-                                                        .doOnNext(lastMessageID -> {
-                                                            logTimeTaken(startTime, 4, null);
-                                                            msg.setLastMessageID(lastMessageID);
+//                                                getLastMessageID(msg)
+//                                                        .doOnNext(lastMessageID -> {
+                                                logTimeTaken(startTime, 4, null);
+//                                                msg.setLastMessageID(lastMessageID);
 
-                                                            /* Switch From & To */
-                                                            switchFromTo(msg);
+                                                /* Switch From & To */
+                                                switchFromTo(msg);
 
-                                                            if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
-                                                                try {
-                                                                    log.info("final msg.toXML(): " + msg.toXML().toString());
-                                                                    if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals("generic")) {
-                                                                        kafkaProducer.send(genericTransformerTopic, msg.toXML());
-                                                                    } else {
-                                                                        kafkaProducer.send(odkTransformerTopic, msg.toXML());
-                                                                    }
-                                                                    // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
-                                                                } catch (JAXBException e) {
-                                                                    e.printStackTrace();
-                                                                }
-                                                                logTimeTaken(startTime, 0, "process-end: %d ms");
-                                                            }
-                                                        })
-                                                        .doOnError(new Consumer<Throwable>() {
-                                                            @Override
-                                                            public void accept(Throwable throwable) {
-                                                                log.error("Error in getLastMessageID" + throwable.getMessage());
-                                                            }
-                                                        })
-                                                        .subscribe();
+                                                if (msg.getMessageState().equals(XMessage.MessageState.REPLIED) || msg.getMessageState().equals(XMessage.MessageState.OPTED_IN)) {
+                                                    try {
+                                                        log.info("final msg.toXML(): " + msg.toXML().toString());
+                                                        if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals("generic")) {
+                                                            kafkaProducer.send(genericTransformerTopic, msg.toXML());
+                                                        } else {
+                                                            kafkaProducer.send(odkTransformerTopic, msg.toXML());
+                                                        }
+                                                        // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
+                                                    } catch (JAXBException e) {
+                                                        e.printStackTrace();
+                                                    }
+                                                    logTimeTaken(startTime, 0, "process-end: %d ms");
+                                                } else {
+                                                    log.error("ReactiveConsumer:onMessage:: MessageSate Invalid Found : " + msg.getMessageState());
+                                                }
+//                                                        })
+//                                                        .doOnError(new Consumer<Throwable>() {
+//                                                            @Override
+//                                                            public void accept(Throwable throwable) {
+//                                                                log.error("Error in getLastMessageID" + throwable.getMessage());
+//                                                            }
+//                                                        })
+//                                                        .subscribe();
                                             } catch (Exception ex) {
                                                 log.error("ReactiveConsumer:ODK and Generic Bot Processing:Exception: " + ex.getMessage());
                                             }
@@ -362,21 +364,21 @@ public class ReactiveConsumer {
 
         /* Get federated users from federation services */
         JSONArray users = userService.getUsersFromFederatedServers(botId, page);
-        for (int i = 0; i < users.length(); i++) {
-            JSONObject jsonObject = (JSONObject) users.get(i);
-            if (jsonObject != null && !jsonObject.isNull("phoneNo")) {
-                String phoneNo = jsonObject.getString("phoneNo");
-                if (federatedUsers.contains(phoneNo)) {
-                    existingFederatedUsers++;
-                    log.info("ReactiveConsumer:getFederatedUsersMeta:: Duplicate Phone Number found : count: " + existingFederatedUsers + " Phone No : " + phoneNo);
-                } else {
-                    log.info("ReactiveConsumer:getFederatedUsersMeta::Inserting User in set : " + phoneNo);
-                    federatedUsers.add(phoneNo);
-                }
-            } else {
-                log.error("ReactiveConsumer:getFederatedUsersMeta::No Federated Users Found: " + users.get(i).toString());
-            }
-        }
+//        for (int i = 0; i < users.length(); i++) {
+//            JSONObject jsonObject = (JSONObject) users.get(i);
+//            if (jsonObject != null && !jsonObject.isNull("phoneNo")) {
+//                String phoneNo = jsonObject.getString("phoneNo");
+//                if (federatedUsers.contains(phoneNo)) {
+//                    existingFederatedUsers++;
+//                    log.info("ReactiveConsumer:getFederatedUsersMeta:: Duplicate Phone Number found : count: " + existingFederatedUsers + " Phone No : " + phoneNo);
+//                } else {
+//                    log.info("ReactiveConsumer:getFederatedUsersMeta::Inserting User in set : " + phoneNo);
+//                    federatedUsers.add(phoneNo);
+//                }
+//            } else {
+//                log.error("ReactiveConsumer:getFederatedUsersMeta::No Federated Users Found: " + users.get(i).toString());
+//            }
+//        }
 
         log.info("ReactiveConsumer:getFederatedUsersMeta::Count: " + (users == null ? "user not found" : users.length()) + " >> Set count: " + federatedUsers.size());
 
