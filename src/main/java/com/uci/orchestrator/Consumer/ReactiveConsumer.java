@@ -100,10 +100,11 @@ public class ReactiveConsumer {
     private long consumeCount;
     private long pushCount;
 
-    private Set<String> messageIdSet = new HashSet<>();
     private HashSet<String> federatedUsers = new HashSet<>();
 
     private long insertSetCount, existSetCount, existingFederatedUsers;
+    @Value("${notification-kafka-cache}")
+    private String notificationKafkaCache;
 
     @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
     public void onMessage(@Payload String stringMessage) {
@@ -114,20 +115,52 @@ public class ReactiveConsumer {
             if (msg != null && msg.getProvider().equalsIgnoreCase("firebase")) {
                 consumeCount++;
                 log.info("Consume topic by Orchestrator count : " + consumeCount);
-                // This code for kafka duplication problem
-                if (msg.getMessageId() != null && msg.getMessageId().getChannelMessageId() != null) {
+
+                /**
+                 *  Kafka Duplication check
+                 *  If messageId found in cache we don't send notifications
+                 *  We need to resolve this issue from kafka side this is temporary solution
+                 */
+                if (msg.getMessageId() != null && msg.getMessageId().getChannelMessageId() != null && notificationKafkaCache != null) {
                     String messageId = msg.getMessageId().getChannelMessageId();
-                    if (messageIdSet.contains(messageId)) {
-                        existSetCount++;
-                        log.info("ReactiveConsumer:Already Counsumed : " + existSetCount + " MessageId : " + messageId);
-                        return;
-                    } else {
-                        insertSetCount++;
-                        log.info("ReactiveConsumer:Insert in set count : " + insertSetCount + " MessageId : " + messageId);
+
+                    if (!redisCacheService.isKeyExists(notificationKafkaCache)) {
+                        Set<String> messageIdSet = new HashSet<>();
                         messageIdSet.add(messageId);
+                        redisCacheService.setCache(notificationKafkaCache, messageIdSet);
+                        insertSetCount++;
+                        log.info("ReactiveConsumer:First MessageId Insert in Redis count : " + insertSetCount + " MessageId : " + messageId);
+                    } else {
+                        Set<String> messageIdSet = (Set<String>) redisCacheService.getCache(notificationKafkaCache);
+                        if (messageIdSet.contains(messageId)) {
+                            existSetCount++;
+                            log.info("ReactiveConsumer:Already Consumed : " + existSetCount + " MessageId : " + messageId);
+                            return;
+                        } else {
+                            messageIdSet.add(messageId);
+                            redisCacheService.setCache(notificationKafkaCache, messageIdSet);
+                            insertSetCount++;
+                            log.info("ReactiveConsumer:MessageId Insert in Redis count : " + insertSetCount + " MessageId : " + messageId);
+                        }
                     }
+                } else {
+                    log.error("ReactiveConsumer:MessageId Not Found : " + msg.getMessageId() + " or Notification Cache Name Empty : " + notificationKafkaCache);
                 }
-                log.info("ReactiveConsumer: Total MessageId Set : " + messageIdSet.size());
+
+                // This code for kafka duplication problem
+//                if (msg.getMessageId() != null && msg.getMessageId().getChannelMessageId() != null) {
+//                    String messageId = msg.getMessageId().getChannelMessageId();
+//                    if (messageIdSet.contains(messageId)) {
+//                        existSetCount++;
+//                        log.info("ReactiveConsumer:Already Counsumed : " + existSetCount + " MessageId : " + messageId);
+//                        return;
+//                    } else {
+//                        insertSetCount++;
+//                        log.info("ReactiveConsumer:Insert in set count : " + insertSetCount + " MessageId : " + messageId);
+//                        messageIdSet.add(messageId);
+//                    }
+//                }
+//                log.info("ReactiveConsumer: Total MessageId Set : " + messageIdSet.size());
             }
 
             SenderReceiverInfo from = msg.getFrom();
@@ -149,65 +182,69 @@ public class ReactiveConsumer {
                         String appId = botNode.get("id").asText();
                         JsonNode firstTransformer = botNode.findValues("transformers").get(0);
 
-                        resolveUser(message, appId)
-                                .doOnNext(new Consumer<XMessage>() {
-                                    @Override
-                                    public void accept(XMessage msg) {
-                                        SenderReceiverInfo from = msg.getFrom();
-                                        // msg.setFrom(from);
-                                        if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
-                                            try {
-                                                log.info("ReactiveConsumer:broadcastNotificationChunkSize : " + broadcastNotificationChunkSize);
-                                                /* Switch From & To */
-                                                switchFromTo(msg);
-                                                Integer chunkSize = null;
-                                                try {
-                                                    chunkSize = Integer.parseInt(broadcastNotificationChunkSize);
-                                                } catch (NumberFormatException ex) {
-                                                    chunkSize = null;
+                        if (message != null && message.getProviderURI().equals("firebase") && message.getChannelURI().equals("web")) {
+                            if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
+                                try {
+                                    log.info("ReactiveConsumer:broadcastNotificationChunkSize : " + broadcastNotificationChunkSize);
+                                    /* Switch From & To */
+                                    switchFromTo(msg);
+                                    Integer chunkSize = null;
+                                    try {
+                                        chunkSize = Integer.parseInt(broadcastNotificationChunkSize);
+                                    } catch (NumberFormatException ex) {
+                                        chunkSize = null;
+                                    }
+                                    if (chunkSize != null) {
+                                        if (msg.getTransformers() != null && msg.getTransformers().size() > 0 && msg.getTransformers().get(0) != null
+                                                && msg.getTransformers().get(0).getMetaData() != null && msg.getTransformers().get(0).getMetaData().get("federatedUsers") != null) {
+                                            JSONArray federatedUsers = new JSONObject(msg.getTransformers().get(0).getMetaData().get("federatedUsers")).getJSONArray("list");
+                                            int totalFederatedUsers = federatedUsers.length();
+                                            if (totalFederatedUsers <= chunkSize) {
+                                                log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: " + totalFederatedUsers);
+                                                kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                            } else {
+                                                List<JSONArray> jsonArrayList = chunkArrayList(federatedUsers, chunkSize);
+                                                int count = 1;
+                                                for (JSONArray jsonArray : jsonArrayList) {
+                                                    log.info("Total Federated Users : " + federatedUsers.length() + " Chunk size : " + jsonArray.length() + " Sent to kafka : " + count);
+                                                    msg.getTransformers().get(0).getMetaData().put("federatedUsers", new JSONObject().put("list", jsonArray).toString());
+                                                    log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: " + jsonArray.length());
+                                                    kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                                    count++;
                                                 }
-                                                if (chunkSize != null) {
-                                                    if (msg.getTransformers() != null && msg.getTransformers().size() > 0 && msg.getTransformers().get(0) != null
-                                                            && msg.getTransformers().get(0).getMetaData() != null && msg.getTransformers().get(0).getMetaData().get("federatedUsers") != null) {
-                                                        JSONArray federatedUsers = new JSONObject(msg.getTransformers().get(0).getMetaData().get("federatedUsers")).getJSONArray("list");
-                                                        int totalFederatedUsers = federatedUsers.length();
-                                                        if (totalFederatedUsers <= chunkSize) {
-                                                            log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: " + totalFederatedUsers);
-                                                            kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
-                                                        } else {
-                                                            List<JSONArray> jsonArrayList = chunkArrayList(federatedUsers, chunkSize);
-                                                            int count = 1;
-                                                            for (JSONArray jsonArray : jsonArrayList) {
-                                                                log.info("Total Federated Users : " + federatedUsers.length() + " Chunk size : " + jsonArray.length() + " Sent to kafka : " + count);
-                                                                msg.getTransformers().get(0).getMetaData().put("federatedUsers", new JSONObject().put("list", jsonArray).toString());
-                                                                log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: " + jsonArray.length());
-                                                                kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
-                                                                count++;
-                                                            }
-                                                        }
-                                                    } else {
-                                                        log.error("ReactiveConsumer:federatedUsers not found in xMessage: " + msg);
-                                                    }
-                                                } else {
-                                                    if (msg.getTransformers() != null && msg.getTransformers().size() > 0 && msg.getTransformers().get(0) != null
-                                                            && msg.getTransformers().get(0).getMetaData() != null && msg.getTransformers().get(0).getMetaData().get("federatedUsers") != null) {
-                                                        JSONArray federatedUsers = new JSONObject(msg.getTransformers().get(0).getMetaData().get("federatedUsers")).getJSONArray("list");
-                                                        log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: " + federatedUsers.length());
-                                                        kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
-                                                    } else {
-                                                        log.error("ReactiveConsumer:federatedUsers not found in xMessage: " + msg);
-                                                    }
-                                                }
-                                                pushCount++;
-                                                notificationProcessedCount++;
-                                                logTimeTaken(startTime, 0, "Notification processed by orchestrator: " + notificationProcessedCount + " :: Push count : "
-                                                        + pushCount + " :: orchestrator-notification-process-end-time: %d ms");
-                                            } catch (Exception ex) {
-                                                log.error("ReactiveConsumer:Notification Triggering Process:Error in pushing xMessage to kafka: " + ex.getMessage());
                                             }
                                         } else {
+                                            log.error("ReactiveConsumer:federatedUsers not found in xMessage: " + msg);
+                                        }
+                                    } else {
+                                        if (msg.getTransformers() != null && msg.getTransformers().size() > 0 && msg.getTransformers().get(0) != null
+                                                && msg.getTransformers().get(0).getMetaData() != null && msg.getTransformers().get(0).getMetaData().get("federatedUsers") != null) {
+                                            JSONArray federatedUsers = new JSONObject(msg.getTransformers().get(0).getMetaData().get("federatedUsers")).getJSONArray("list");
+                                            log.info("ReactiveConsumer:Pushed Federated Users to Kafka Topic: " + federatedUsers.length());
+                                            kafkaProducer.send(broadcastTransformerTopic, msg.toXML());
+                                        } else {
+                                            log.error("ReactiveConsumer:federatedUsers not found in xMessage: " + msg);
+                                        }
+                                    }
+                                    pushCount++;
+                                    notificationProcessedCount++;
+                                    logTimeTaken(startTime, 0, "Notification processed by orchestrator: " + notificationProcessedCount + " :: Push count : "
+                                            + pushCount + " :: orchestrator-notification-process-end-time: %d ms");
+                                } catch (Exception ex) {
+                                    log.error("ReactiveConsumer:Notification Triggering Process:Error in pushing xMessage to kafka: " + ex.getMessage());
+                                }
+                            } else {
+                                log.error("ReactiveConsumer:onMessage:: Invalid Type Found : " + firstTransformer.findValue("type"));
+                            }
+                        } else {
+                            log.info("ReactiveConsumer:ResolveUser Calling: " + message);
+                            resolveUser(message, appId)
+                                    .doOnNext(new Consumer<XMessage>() {
+                                        @Override
+                                        public void accept(XMessage msg) {
+                                            SenderReceiverInfo from = msg.getFrom();
+                                            // msg.setFrom(from);
                                             try {
-                                                log.info("Calling ODK : " + msg.toString());
 //                                                getLastMessageID(msg)
 //                                                        .doOnNext(lastMessageID -> {
                                                 logTimeTaken(startTime, 4, null);
@@ -243,16 +280,16 @@ public class ReactiveConsumer {
                                             } catch (Exception ex) {
                                                 log.error("ReactiveConsumer:ODK and Generic Bot Processing:Exception: " + ex.getMessage());
                                             }
-                                        }
 
-                                    }
-                                })
-                                .doOnError(new Consumer<Throwable>() {
-                                    @Override
-                                    public void accept(Throwable throwable) {
-                                        log.error("Error in resolveUser" + throwable.getMessage());
-                                    }
-                                }).subscribe();
+                                        }
+                                    })
+                                    .doOnError(new Consumer<Throwable>() {
+                                        @Override
+                                        public void accept(Throwable throwable) {
+                                            log.error("Error in resolveUser" + throwable.getMessage());
+                                        }
+                                    }).subscribe();
+                        }
                     } else {
                         log.error("Bot node not found by name: " + msg.getApp());
                     }
@@ -364,21 +401,23 @@ public class ReactiveConsumer {
 
         /* Get federated users from federation services */
         JSONArray users = userService.getUsersFromFederatedServers(botId, page);
-//        for (int i = 0; i < users.length(); i++) {
-//            JSONObject jsonObject = (JSONObject) users.get(i);
-//            if (jsonObject != null && !jsonObject.isNull("phoneNo")) {
-//                String phoneNo = jsonObject.getString("phoneNo");
-//                if (federatedUsers.contains(phoneNo)) {
-//                    existingFederatedUsers++;
-//                    log.info("ReactiveConsumer:getFederatedUsersMeta:: Duplicate Phone Number found : count: " + existingFederatedUsers + " Phone No : " + phoneNo);
-//                } else {
+        for (int i = 0; i < users.length(); i++) {
+            JSONObject jsonObject = (JSONObject) users.get(i);
+            if (jsonObject != null && !jsonObject.isNull("phoneNo")) {
+                String phoneNo = jsonObject.getString("phoneNo");
+                if (federatedUsers.contains(phoneNo)) {
+                    existingFederatedUsers++;
+                    log.info("ReactiveConsumer:getFederatedUsersMeta:: Duplicate Phone Number found : count: " + existingFederatedUsers + " Phone No : " + phoneNo);
+                }
+//                else {
 //                    log.info("ReactiveConsumer:getFederatedUsersMeta::Inserting User in set : " + phoneNo);
 //                    federatedUsers.add(phoneNo);
 //                }
-//            } else {
+            }
+//            else {
 //                log.error("ReactiveConsumer:getFederatedUsersMeta::No Federated Users Found: " + users.get(i).toString());
 //            }
-//        }
+        }
 
         log.info("ReactiveConsumer:getFederatedUsersMeta::Count: " + (users == null ? "user not found" : users.length()) + " >> Set count: " + federatedUsers.size());
 
