@@ -121,7 +121,7 @@ public class ReactiveConsumer {
                  *  If messageId found in cache we don't send notifications
                  *  We need to resolve this issue from kafka side this is temporary solution
                  */
-                if (msg.getMessageId() != null && msg.getMessageId().getChannelMessageId() != null && notificationKafkaCache != null) {
+                if (msg.getMessageId() != null && msg.getMessageId().getChannelMessageId() != null && notificationKafkaCache != null && !notificationKafkaCache.isEmpty()) {
                     String messageId = msg.getMessageId().getChannelMessageId();
 
                     if (!redisCacheService.isKeyExists(notificationKafkaCache)) {
@@ -343,9 +343,9 @@ public class ReactiveConsumer {
                     if (transformerMeta.get("type") != null && transformerMeta.get("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
                         if (xMessage != null && xMessage.getFrom() != null && xMessage.getFrom().getMeta() != null && xMessage.getFrom().getMeta().containsKey("page")) {
                             log.info("page number orch : " + xMessage.getFrom().getMeta().get("page"));
-                            metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, xMessage.getFrom().getMeta().get("page")));
+                            metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, xMessage.getFrom().getMeta()));
                         } else {
-                            metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, null));
+                            metaData.put("federatedUsers", getFederatedUsersMeta(botNode, transformer, xMessage.getFrom().getMeta()));
                         }
                     }
 
@@ -396,11 +396,11 @@ public class ReactiveConsumer {
      * @param transformer
      * @return Federated users as json string
      */
-    private String getFederatedUsersMeta(JsonNode botNode, JsonNode transformer, String page) {
+    private String getFederatedUsersMeta(JsonNode botNode, JsonNode transformer, Map<String, String> meta) {
         String botId = botNode.get("id").asText();
 
         /* Get federated users from federation services */
-        JSONArray users = userService.getUsersFromFederatedServers(botId, page);
+        JSONArray users = userService.getUsersFromFederatedServers(botId, meta);
         for (int i = 0; i < users.length(); i++) {
             JSONObject jsonObject = (JSONObject) users.get(i);
             if (jsonObject != null && !jsonObject.isNull("phoneNo")) {
