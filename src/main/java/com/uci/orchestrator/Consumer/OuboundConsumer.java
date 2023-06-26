@@ -22,15 +22,33 @@ public class OuboundConsumer {
     @Value("${outbound}")
     private String outboundTopic;
 
+    @Value("${notificationOutbound}")
+    public String notificationOutbound;
+
     @Autowired
     public SimpleProducer kafkaProducer;
+
+    private long consumeCount, pushNotificationCount, pushOtherCount;
+
 
     @KafkaListener(id = "${processOutbound}", topics = "${processOutbound}", properties = {"spring.json.value.default.type=java.lang.String"})
     public void onMessage(@Payload String stringMessage) {
         try {
+            consumeCount++;
+            log.info("OutboundConsumer:onMessage:: Consume Topic Count: " + consumeCount);
             XMessage msg = XMessageParser.parse(new ByteArrayInputStream(stringMessage.getBytes()));
-            kafkaProducer.send(outboundTopic, msg.toXML());
-        } catch(JAXBException e) {
+            if (msg != null && msg.getProvider() != null && msg.getProvider().equalsIgnoreCase("firebase")
+                    && msg.getChannel().equalsIgnoreCase("web")) {
+                pushNotificationCount++;
+                log.info("OutboundConsumer:onMessage:: Notification push to kafka topic count: " + pushNotificationCount + " UserId : " + msg.getTo().getUserID());
+                kafkaProducer.send(notificationOutbound, msg.toXML());
+            } else {
+                pushOtherCount++;
+                log.info("OutboundConsumer:onMessage:: Other push to kafka topic count: " + pushOtherCount);
+                kafkaProducer.send(outboundTopic, msg.toXML());
+            }
+
+        } catch (JAXBException e) {
             e.printStackTrace();
         }
     }
