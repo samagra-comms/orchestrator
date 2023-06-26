@@ -3,6 +3,7 @@ package com.uci.orchestrator.Application;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.uci.orchestrator.Drools.DroolsBeanFactory;
 import com.uci.utils.BotService;
+import com.uci.utils.dto.BotServiceParams;
 import com.uci.utils.kafka.ReactiveProducer;
 import io.fusionauth.client.FusionAuthClient;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -42,9 +43,9 @@ public class AppConfigOrchestrator {
 
     @Value("${campaign.url}")
     public String CAMPAIGN_URL;
-    
+
     @Value("${campaign.admin.token}")
-	public String CAMPAIGN_ADMIN_TOKEN;
+    public String CAMPAIGN_ADMIN_TOKEN;
 
     @Value("${fusionauth.url}")
     public String FUSIONAUTH_URL;
@@ -133,21 +134,22 @@ public class AppConfigOrchestrator {
     ReactiveProducer kafkaReactiveProducer() {
         return new ReactiveProducer();
     }
-    
+
     @Bean
-    ProducerFactory<String, String> producerFactory(){
-    	ProducerFactory<String, String> producerFactory = new DefaultKafkaProducerFactory<>(kafkaProducerConfiguration());
-    	return producerFactory;
+    ProducerFactory<String, String> producerFactory() {
+        ProducerFactory<String, String> producerFactory = new DefaultKafkaProducerFactory<>(kafkaProducerConfiguration());
+        return producerFactory;
     }
-    
+
     @Bean
     KafkaTemplate<String, String> kafkaTemplate() {
-    	KafkaTemplate<String, String> kafkaTemplate = new KafkaTemplate<>(producerFactory());
-    	return (KafkaTemplate<String, String>) kafkaTemplate;
+        KafkaTemplate<String, String> kafkaTemplate = new KafkaTemplate<>(producerFactory());
+        return (KafkaTemplate<String, String>) kafkaTemplate;
     }
 
     /**
      * Create process outbound topic, if does not exists
+     *
      * @return
      */
     @Bean
@@ -157,6 +159,7 @@ public class AppConfigOrchestrator {
 
     /**
      * Create broadcast transformer topic, if does not exists
+     *
      * @return
      */
     @Bean
@@ -166,10 +169,16 @@ public class AppConfigOrchestrator {
 
     /**
      * Create generic transformer topic, if does not exists
+     *
      * @return
      */
     @Bean
     public NewTopic createGenericTransformerTopic() {
         return new NewTopic(genericTransformerTopic, 1, (short) 1);
+    }
+
+    @Bean
+    public BotServiceParams getBotServiceParams() {
+        return new BotServiceParams();
     }
 }
