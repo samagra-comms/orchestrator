@@ -49,7 +49,7 @@ public class CampaignConsumer {
     public String broadcastTransformerTopic;
     private long notificationProcessedCount;
 
-    @KafkaListener(id = "${campaign}", topics = "${campaign}", properties = {"spring.json.value.default.type=java.lang.String"})
+    @KafkaListener(id = "${notificationInboundProcessed}", topics = "${notificationInboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
     public void consumeMessage(@Payload String stringMessage) {
         try {
             final long startTime = System.nanoTime();
