@@ -108,7 +108,8 @@ public class CampaignConsumer {
 
                         JsonNode firstTransformer = botNode.findValues("transformers").get(0);
 
-                        if (message != null && message.getProviderURI().equals("firebase") && message.getChannelURI().equals("web")) {
+                        if (message != null && (message.getProviderURI().equals("firebase") && message.getChannelURI().equals("web"))
+                                || ((message.getProviderURI().equals("cdac") || message.getProviderURI().equals("gupshup")) && message.getChannelURI().equals("sms"))) {
                             if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals(BotUtil.transformerTypeBroadcast)) {
                                 try {
                                     log.info("CampaignConsumer:broadcastNotificationChunkSize : " + broadcastNotificationChunkSize);
