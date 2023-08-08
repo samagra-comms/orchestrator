@@ -11,15 +11,15 @@
 	</parent>
 	<groupId>com.uci</groupId>
 	<artifactId>orchestrator</artifactId>
-	<version>2.2.12</version>
+	<version>2.2.13</version>
 	<name>orchestrator</name>
 	<description>Demo project for Spring Boot</description>
 
 	<properties>
 		<java.version>11</java.version>
-		<utils.version>2.2.7</utils.version>
-		<messagerosa.version>2.2.7</messagerosa.version>
-		<dao.version>2.2.7</dao.version>
+		<utils.version>2.2.8</utils.version>
+		<messagerosa.version>2.2.8</messagerosa.version>
+		<dao.version>2.2.8</dao.version>
 	</properties>
 
 	<!-- For Downloading repositories from github packages -->
