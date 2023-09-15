@@ -2,6 +2,7 @@ package com.uci.orchestrator.Consumer;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.uci.orchestrator.Service.CommonService;
+import com.uci.orchestrator.Service.TransformerProducer;
 import com.uci.utils.BotService;
 import com.uci.utils.bot.util.BotUtil;
 import com.uci.utils.cache.service.RedisCacheService;
@@ -19,6 +20,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 import reactor.core.publisher.Flux;
 import reactor.kafka.receiver.ReceiverRecord;
 
@@ -38,6 +40,8 @@ public class ReactiveConsumer {
 
     @Autowired
     public SimpleProducer kafkaProducer;
+    @Autowired
+    public TransformerProducer transactionalKafkaProducer;
 
     @Value("${odk-transformer}")
     public String odkTransformerTopic;
@@ -69,6 +73,7 @@ public class ReactiveConsumer {
     private CommonService commonService;
 
     @KafkaListener(id = "${inboundProcessed}", topics = "${inboundProcessed}", properties = {"spring.json.value.default.type=java.lang.String"})
+    @Transactional
     public void onMessage(@Payload String stringMessage) {
         try {
             final long startTime = System.nanoTime();
@@ -221,7 +226,8 @@ public class ReactiveConsumer {
                                                         if (firstTransformer.findValue("type") != null && firstTransformer.findValue("type").asText().equals("generic")) {
                                                             kafkaProducer.send(genericTransformerTopic, msg.toXML());
                                                         } else {
-                                                            kafkaProducer.send(odkTransformerTopic, msg.toXML());
+                                                            transactionalKafkaProducer.sendTransaction(odkTransformerTopic, msg.toXML());
+//                                                            kafkaProducer.send(odkTransformerTopic, msg.toXML());
                                                         }
                                                         // reactiveProducer.sendMessages(odkTransformerTopic, msg.toXML());
                                                     } catch (JAXBException e) {
