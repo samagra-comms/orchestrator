@@ -1,6 +1,8 @@
 package com.uci.orchestrator.Application;
 
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.admin.NewTopic;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.autoconfigure.data.cassandra.CassandraDataAutoConfiguration;
@@ -23,7 +25,11 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @PropertySource("application.properties")
 @SpringBootApplication(exclude = {CassandraDataAutoConfiguration.class})
 @EnableTransactionManagement
+@Slf4j
 public class OrchestratorApplication {
+
+    @Value("${transformer.topic.partition.count}")
+    private Integer partitionCount;
 
     public static void main(String[] args) {
         SpringApplication.run(OrchestratorApplication.class, args);
@@ -31,8 +37,9 @@ public class OrchestratorApplication {
 
     @Bean
     public NewTopic transactionsTopic() {
+        log.info("Transformer Topic Partitions Count : " + partitionCount);
         return TopicBuilder.name("com.odk.transformer")
-                .partitions(2)
+                .partitions(partitionCount)
                 .replicas(1)
                 .build();
     }
