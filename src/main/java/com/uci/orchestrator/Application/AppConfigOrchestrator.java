@@ -18,9 +18,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.kafka.transaction.KafkaTransactionManager;
 import reactor.core.publisher.Flux;
 import reactor.kafka.receiver.KafkaReceiver;
 import reactor.kafka.receiver.ReceiverOptions;
@@ -142,10 +143,12 @@ public class AppConfigOrchestrator {
     }
 
     @Bean
+    @Primary
     KafkaTemplate<String, String> kafkaTemplate() {
         KafkaTemplate<String, String> kafkaTemplate = new KafkaTemplate<>(producerFactory());
         return (KafkaTemplate<String, String>) kafkaTemplate;
     }
+
 
     /**
      * Create process outbound topic, if does not exists
@@ -180,5 +183,44 @@ public class AppConfigOrchestrator {
     @Bean
     public BotServiceParams getBotServiceParams() {
         return new BotServiceParams();
+    }
+
+
+    /**
+     * This is for com.odk.transformer topic
+     */
+
+    @Bean
+    Map<String, Object> kafkaTransactionalProducerConfiguration() {
+        Map<String, Object> configuration = new HashMap<>();
+        configuration.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
+        configuration.put(ProducerConfig.CLIENT_ID_CONFIG, "sample-producer-txn");
+        configuration.put(ProducerConfig.ACKS_CONFIG, "all");
+        configuration.put(org.springframework.kafka.support.serializer.JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
+        configuration.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, org.springframework.kafka.support.serializer.JsonSerializer.class);
+        configuration.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, org.springframework.kafka.support.serializer.JsonSerializer.class);
+        configuration.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+        configuration.put(ProducerConfig.TRANSACTIONAL_ID_CONFIG, "transformer-id");
+        return configuration;
+    }
+
+
+    @Bean
+    ProducerFactory<String, String> transactionalProducerFactory() {
+        DefaultKafkaProducerFactory<String, String> producerFactory = new DefaultKafkaProducerFactory<>(kafkaTransactionalProducerConfiguration());
+        producerFactory.transactionCapable();
+        producerFactory.setTransactionIdPrefix("transformer-");
+        return producerFactory;
+    }
+
+    @Bean
+    public KafkaTransactionManager<String, String> kafkaTransactionManager(ProducerFactory<String, String> transactionalProducerFactory) {
+        return new KafkaTransactionManager<>(transactionalProducerFactory);
+    }
+
+    @Bean(name = "transactionalKafkaTemplate")
+    KafkaTemplate<String, String> transactionalKafkaTemplate() {
+        KafkaTemplate<String, String> kafkaTemplate = new KafkaTemplate<>(transactionalProducerFactory());
+        return kafkaTemplate;
     }
 }
