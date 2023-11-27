@@ -321,7 +321,7 @@ public class CommonService {
 
             UUID appID = UUID.fromString(appId);
 
-            String deviceString = from.getDeviceType().toString() + ":" + from.getUserID();
+            String deviceString = from.getUserID();
             String encodedBase64Key = encodeKey(secret);
             String deviceID = AESWrapper.encrypt(deviceString, encodedBase64Key);
             log.info("ReactiveConsumer:resolveUser::Calling:deviceString: " + deviceString + ", encyprted deviceString: " + deviceID);
