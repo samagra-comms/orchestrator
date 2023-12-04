@@ -11,7 +11,7 @@
 	</parent>
 	<groupId>com.uci</groupId>
 	<artifactId>orchestrator</artifactId>
-	<version>2.4.0</version>
+	<version>2.4.1</version>
 	<name>orchestrator</name>
 	<description>Demo project for Spring Boot</description>
 
