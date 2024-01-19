@@ -343,7 +343,14 @@ public class CommonService {
                                     from.setEncryptedDeviceID(deviceID);
                                     xmsg.setFrom(from);
                                     ClientResponse<UserResponse, Errors> response = botService.fusionAuthClient.retrieveUserByUsername(deviceID);
-                                    if (response.wasSuccessful() && isUserRegistered(response, appID)) {
+                                    boolean wasSuccessful = response.wasSuccessful();
+                                    boolean isUserRegistered = false;
+                                    if (wasSuccessful) {
+                                        isUserRegistered = isUserRegistered(response, appID);
+                                    }
+                                    log.info("CommonService::UpdateUser: response.wasSuccessful: " + wasSuccessful);
+                                    log.info("CommonService::UpdateUser: isUserRegistered: " + isUserRegistered);
+                                    if (wasSuccessful && isUserRegistered) {
                                         redisCacheService.setFAUserIDForAppCache(getFACacheName(deviceID, appID), response.successResponse.user.id.toString());
                                         return Mono.just(xmsg);
                                     } else {
@@ -384,8 +391,14 @@ public class CommonService {
 
         if (userID == null || userID.isEmpty()) {
             ClientResponse<UserResponse, Errors> response = botService.fusionAuthClient.retrieveUserByUsername(deviceID);
-
-            if (response.wasSuccessful() && isUserRegistered(response, appID)) {
+            boolean wasSuccessful = response.wasSuccessful();
+            boolean isUserRegistered = false;
+            if (wasSuccessful) {
+                wasSuccessful = isUserRegistered(response, appID);
+            }
+            log.info("CommonService::UpdateUser: response.wasSuccessful: " + wasSuccessful);
+            log.info("CommonService::UpdateUser: isUserRegistered: " + isUserRegistered);
+            if (wasSuccessful && isUserRegistered) {
                 userID = response.successResponse.user.id.toString();
                 redisCacheService.setFAUserIDForAppCache(getFACacheName(deviceID, appID), userID);
             }
