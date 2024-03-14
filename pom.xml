@@ -17,9 +17,9 @@
 
 	<properties>
 		<java.version>11</java.version>
-		<utils.version>2.4.1</utils.version>
-		<messagerosa.version>2.4.1</messagerosa.version>
-		<dao.version>2.4.1</dao.version>
+		<utils.version>2.4.2</utils.version>
+		<messagerosa.version>2.4.2</messagerosa.version>
+		<dao.version>2.4.2</dao.version>
 	</properties>
 
 	<!-- For Downloading repositories from github packages -->
